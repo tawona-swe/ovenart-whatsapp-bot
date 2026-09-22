@@ -1,0 +1,19 @@
+{
+  "name": "ovenart-whatsapp-bot",
+  "version": "0.1.0",
+  "description": "WhatsApp ordering bot for Oven Art Craft Bakery (retail division)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
