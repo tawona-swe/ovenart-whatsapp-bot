@@ -12,7 +12,9 @@ function getSession(phone) {
 }
 
 function resetSession(phone) {
-  sessions.set(phone, { state: "START", cart: [], customer: {} });
+  const fresh = { state: "START", cart: [], customer: {} };
+  sessions.set(phone, fresh);
+  return fresh;
 }
 
 module.exports = { getSession, resetSession };

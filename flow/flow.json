@@ -1,0 +1,194 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "MENU": ["CHECKOUT"],
+    "CHECKOUT": ["CONFIRMATION"],
+    "CONFIRMATION": []
+  },
+  "screens": [
+    {
+      "id": "MENU",
+      "title": "Menu",
+      "data": {
+        "cart_summary": {
+          "type": "string",
+          "__example__": "Your cart is empty. Pick a product below to get started."
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          },
+          "__example__": [
+            {
+              "id": "1",
+              "title": "Sourdough Cheese Bread — $2.88",
+              "description": "BREAD · Classic sourdough with a cheesy twist."
+            }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Oven Art Bakery"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.cart_summary}"
+          },
+          {
+            "type": "Dropdown",
+            "name": "product_id",
+            "label": "Choose a product",
+            "required": true,
+            "data-source": "${data.products}"
+          },
+          {
+            "type": "Dropdown",
+            "name": "qty",
+            "label": "Quantity",
+            "required": true,
+            "data-source": [
+              { "id": "1", "title": "1" },
+              { "id": "2", "title": "2" },
+              { "id": "3", "title": "3" },
+              { "id": "4", "title": "4" },
+              { "id": "5", "title": "5" },
+              { "id": "6", "title": "6" },
+              { "id": "7", "title": "7" },
+              { "id": "8", "title": "8" },
+              { "id": "9", "title": "9" },
+              { "id": "10", "title": "10" }
+            ],
+            "on-select-action": {
+              "name": "data_exchange",
+              "payload": {
+                "action": "add_to_cart",
+                "product_id": "${form.product_id}",
+                "qty": "${form.qty}"
+              }
+            }
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "View cart & checkout →",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": { "action": "go_checkout" }
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "Refresh cart",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": { "action": "back_to_menu" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CHECKOUT",
+      "title": "Checkout",
+      "data": {
+        "cart_summary": {
+          "type": "string",
+          "__example__": "Your cart:\n2x Sourdough Cheese Bread — $5.76\n\nTotal: $5.76"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Checkout"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.cart_summary}"
+          },
+          {
+            "type": "TextInput",
+            "name": "customer_name",
+            "label": "Your name",
+            "input-type": "text",
+            "required": true
+          },
+          {
+            "type": "RadioButtonsGroup",
+            "name": "fulfillment",
+            "label": "Pickup or delivery?",
+            "required": true,
+            "data-source": [
+              { "id": "pickup", "title": "Pickup" },
+              { "id": "delivery", "title": "Delivery" }
+            ]
+          },
+          {
+            "type": "TextInput",
+            "name": "address",
+            "label": "Delivery address",
+            "input-type": "text",
+            "required": false,
+            "visible": "`${form.fulfillment} == 'delivery'`"
+          },
+          {
+            "type": "Footer",
+            "label": "Place order",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "action": "submit_order",
+                "customer_name": "${form.customer_name}",
+                "fulfillment": "${form.fulfillment}",
+                "address": "${form.address}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONFIRMATION",
+      "title": "Order placed",
+      "terminal": true,
+      "data": {
+        "message": {
+          "type": "string",
+          "__example__": "Thanks! Your order has been sent to Oven Art Bakery."
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Order placed!"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.message}"
+          },
+          {
+            "type": "Footer",
+            "label": "Done",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
