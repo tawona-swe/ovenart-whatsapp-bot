@@ -6,13 +6,13 @@ const sessions = new Map();
 
 function getSession(phone) {
   if (!sessions.has(phone)) {
-    sessions.set(phone, { state: "START", cart: [], customer: {} });
+    sessions.set(phone, { state: "START", cart: [], registerDraft: null, fulfillment: null });
   }
   return sessions.get(phone);
 }
 
 function resetSession(phone) {
-  const fresh = { state: "START", cart: [], customer: {} };
+  const fresh = { state: "START", cart: [], registerDraft: null, fulfillment: null };
   sessions.set(phone, fresh);
   return fresh;
 }

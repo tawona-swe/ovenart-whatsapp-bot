@@ -1,5 +1,6 @@
 const { getProduct, getCategories, getProductsByCategorySlug } = require("./products");
 const { getSession, resetSession } = require("./session");
+const { getCustomer, isRegistered, saveCustomer } = require("./customers");
 const { sendText, sendTemplate, sendList, sendButtons } = require("./whatsapp");
 const { appendOrderRow } = require("./ordersSheet");
 
@@ -36,18 +37,48 @@ function nowCAT() {
   );
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ─── Registration ───────────────────────────────────────────────────────────
+
+async function sendRegisterPrompt(phone) {
+  await sendButtons(
+    phone,
+    "👋 Welcome to *Oven Art Bakery*! Looks like this is your first time here — let's get you registered (takes 10 seconds).",
+    [{ id: "register_start", title: "📝 Register" }]
+  );
+}
+
+// ─── Menu / Settings ─────────────────────────────────────────────────────────
+
 async function sendCategoryList(phone) {
   const sections = [
     {
       title: "Menu",
       rows: getCategories().map((c) => ({ id: `cat_${c.slug}`, title: c.label.slice(0, 24) })),
     },
+    {
+      title: "Account",
+      rows: [{ id: "settings_open", title: "⚙️ Settings" }],
+    },
   ];
   await sendList(
     phone,
-    "👋 Welcome to *Oven Art Bakery*! Pick a category to browse, or type *cart* / *checkout* any time.",
+    "Pick a category to browse, or type *cart* / *checkout* any time.",
     "Browse menu",
     sections
+  );
+}
+
+async function sendSettingsMenu(phone, customer) {
+  await sendButtons(
+    phone,
+    `⚙️ *Your details:*\n\n👤 ${customer.name}\n✉️ ${customer.email}\n📍 ${customer.city}\n\nWhat would you like to update? (or type *menu* to go back)`,
+    [
+      { id: "settings_edit_name", title: "Name" },
+      { id: "settings_edit_email", title: "Email" },
+      { id: "settings_edit_city", title: "City" },
+    ]
   );
 }
 
@@ -131,17 +162,28 @@ async function notifyBakery({ orderSummary, name, phone, fulfillment, itemsText,
   }
 }
 
-async function sendConfirmPrompt(phone, session) {
+async function sendConfirmPrompt(phone, session, customer) {
   const summary =
     "📋 *Please confirm your order:*\n\n" +
     `${formatCart(session.cart)}\n\n` +
-    `👤 Name: ${session.customer.name}\n` +
-    `✉️ Email: ${session.customer.email}\n` +
-    `📍 ${session.customer.location}`;
+    `👤 Name: ${customer.name}\n` +
+    `✉️ Email: ${customer.email}\n` +
+    `📍 ${session.fulfillment}`;
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "✅ Confirm" },
     { id: "confirm_no", title: "❌ Cancel" },
   ]);
+}
+
+/** Send whichever entry screen fits: register (new) or menu+settings (returning). */
+async function sendEntryScreen(phone, session) {
+  if (!isRegistered(phone)) {
+    session.state = "REGISTER_START";
+    await sendRegisterPrompt(phone);
+    return;
+  }
+  session.state = "BROWSING_CATEGORY";
+  await sendCategoryList(phone);
 }
 
 // ─── Global commands (recognised in every state) ──────────────────────────────
@@ -165,31 +207,82 @@ async function handleIncoming(phone, input) {
 
   if (GLOBAL_COMMANDS.has(lower)) {
     session = resetSession(phone);
-    session.state = "BROWSING_CATEGORY";
-    await sendCategoryList(phone);
+    await sendEntryScreen(phone, session);
     return null;
   }
 
-  // "cart" / "checkout" work as typed shortcuts from anywhere in browsing.
-  if (lower === "cart") {
+  // "cart" / "checkout" work as typed shortcuts from anywhere in browsing —
+  // only meaningful for a registered customer with an active cart.
+  if (isRegistered(phone) && lower === "cart") {
     await sendCartActions(phone, session.cart);
     session.state = "CART_ACTIONS";
     return null;
   }
-  if (lower === "checkout" && session.cart.length > 0) {
-    session.state = "CHECKOUT_NAME";
-    await sendText(phone, "Great! What name should we put on the order?");
+  if (isRegistered(phone) && lower === "checkout" && session.cart.length > 0) {
+    session.state = "CHECKOUT_FULFILLMENT";
+    await sendFulfillmentPrompt(phone);
     return null;
   }
 
   switch (session.state) {
     case "START": {
+      await sendEntryScreen(phone, session);
+      return null;
+    }
+
+    // ── Registration ─────────────────────────────────────────────────────────
+    case "REGISTER_START": {
+      if (lower === "register_start") {
+        session.state = "REGISTER_NAME";
+        await sendText(phone, "What's your name?");
+        return null;
+      }
+      await sendRegisterPrompt(phone);
+      return null;
+    }
+
+    case "REGISTER_NAME": {
+      if (!text) {
+        await sendText(phone, "Please enter your name.");
+        return null;
+      }
+      session.registerDraft = { name: text };
+      session.state = "REGISTER_EMAIL";
+      await sendText(phone, "Thanks! What's your email address?");
+      return null;
+    }
+
+    case "REGISTER_EMAIL": {
+      if (!text || !EMAIL_RE.test(text)) {
+        await sendText(phone, "Please enter a valid email address (e.g. name@example.com).");
+        return null;
+      }
+      session.registerDraft.email = text;
+      session.state = "REGISTER_CITY";
+      await sendText(phone, "Almost done — which city are you in?");
+      return null;
+    }
+
+    case "REGISTER_CITY": {
+      if (!text) {
+        await sendText(phone, "Please enter your city.");
+        return null;
+      }
+      const customer = saveCustomer(phone, { ...session.registerDraft, city: text });
+      session.registerDraft = null;
+      await sendText(phone, `🎉 You're registered, ${customer.name}! Here's the menu:`);
       session.state = "BROWSING_CATEGORY";
       await sendCategoryList(phone);
       return null;
     }
 
+    // ── Settings ─────────────────────────────────────────────────────────────
     case "BROWSING_CATEGORY": {
+      if (lower === "settings_open") {
+        session.state = "SETTINGS_MENU";
+        await sendSettingsMenu(phone, getCustomer(phone));
+        return null;
+      }
       if (lower.startsWith("cat_")) {
         const slug = lower.slice(4);
         session.state = "BROWSING_PRODUCT";
@@ -200,6 +293,63 @@ async function handleIncoming(phone, input) {
       return null;
     }
 
+    case "SETTINGS_MENU": {
+      if (lower === "settings_edit_name") {
+        session.state = "SETTINGS_EDIT_NAME";
+        await sendText(phone, "What should we update your name to?");
+        return null;
+      }
+      if (lower === "settings_edit_email") {
+        session.state = "SETTINGS_EDIT_EMAIL";
+        await sendText(phone, "What should we update your email to?");
+        return null;
+      }
+      if (lower === "settings_edit_city") {
+        session.state = "SETTINGS_EDIT_CITY";
+        await sendText(phone, "What should we update your city to?");
+        return null;
+      }
+      await sendSettingsMenu(phone, getCustomer(phone));
+      return null;
+    }
+
+    case "SETTINGS_EDIT_NAME": {
+      if (!text) {
+        await sendText(phone, "Please enter your name.");
+        return null;
+      }
+      saveCustomer(phone, { name: text });
+      await sendText(phone, "✅ Name updated.");
+      session.state = "SETTINGS_MENU";
+      await sendSettingsMenu(phone, getCustomer(phone));
+      return null;
+    }
+
+    case "SETTINGS_EDIT_EMAIL": {
+      if (!text || !EMAIL_RE.test(text)) {
+        await sendText(phone, "Please enter a valid email address (e.g. name@example.com).");
+        return null;
+      }
+      saveCustomer(phone, { email: text });
+      await sendText(phone, "✅ Email updated.");
+      session.state = "SETTINGS_MENU";
+      await sendSettingsMenu(phone, getCustomer(phone));
+      return null;
+    }
+
+    case "SETTINGS_EDIT_CITY": {
+      if (!text) {
+        await sendText(phone, "Please enter your city.");
+        return null;
+      }
+      saveCustomer(phone, { city: text });
+      await sendText(phone, "✅ City updated.");
+      session.state = "SETTINGS_MENU";
+      await sendSettingsMenu(phone, getCustomer(phone));
+      return null;
+    }
+
+    // ── Browsing / cart ──────────────────────────────────────────────────────
     case "BROWSING_PRODUCT": {
       if (lower.startsWith("prod_")) {
         const product = getProduct(lower.slice(5));
@@ -252,41 +402,20 @@ async function handleIncoming(phone, input) {
           await sendCategoryList(phone);
           return null;
         }
-        session.state = "CHECKOUT_NAME";
-        await sendText(phone, "Great! What name should we put on the order?");
+        session.state = "CHECKOUT_FULFILLMENT";
+        await sendFulfillmentPrompt(phone);
         return null;
       }
       await sendCartActions(phone, session.cart);
       return null;
     }
 
-    case "CHECKOUT_NAME": {
-      if (!text) {
-        await sendText(phone, "Please enter your name so we can put it on the order.");
-        return null;
-      }
-      session.customer.name = text;
-      session.state = "CHECKOUT_EMAIL";
-      await sendText(phone, "Thanks! What's your email address?");
-      return null;
-    }
-
-    case "CHECKOUT_EMAIL": {
-      if (!text || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
-        await sendText(phone, "Please enter a valid email address (e.g. name@example.com).");
-        return null;
-      }
-      session.customer.email = text;
-      session.state = "CHECKOUT_FULFILLMENT";
-      await sendFulfillmentPrompt(phone);
-      return null;
-    }
-
+    // ── Checkout — name/email already known from registration ─────────────────
     case "CHECKOUT_FULFILLMENT": {
       if (lower === "fulfillment_pickup") {
-        session.customer.location = "Pickup";
+        session.fulfillment = "Pickup";
         session.state = "CHECKOUT_CONFIRM";
-        await sendConfirmPrompt(phone, session);
+        await sendConfirmPrompt(phone, session, getCustomer(phone));
         return null;
       }
       if (lower === "fulfillment_delivery") {
@@ -303,37 +432,40 @@ async function handleIncoming(phone, input) {
         await sendText(phone, "Please share your delivery address.");
         return null;
       }
-      session.customer.location = `Delivery — ${text}`;
+      session.fulfillment = `Delivery — ${text}`;
       session.state = "CHECKOUT_CONFIRM";
-      await sendConfirmPrompt(phone, session);
+      await sendConfirmPrompt(phone, session, getCustomer(phone));
       return null;
     }
 
     case "CHECKOUT_CONFIRM": {
+      const customer = getCustomer(phone);
+
       if (lower === "confirm_yes") {
         const timestamp = nowCAT();
         const orderSummary =
           `🆕 *New Order — ${timestamp}*\n\n` +
-          `👤 ${session.customer.name}  (${phone})\n` +
-          `✉️ ${session.customer.email}\n` +
-          `📍 ${session.customer.location}\n\n` +
+          `👤 ${customer.name}  (${phone})\n` +
+          `✉️ ${customer.email}\n` +
+          `🏙️ ${customer.city}\n` +
+          `📍 ${session.fulfillment}\n\n` +
           formatCart(session.cart);
 
         await notifyBakery({
           orderSummary,
-          name: session.customer.name,
+          name: customer.name,
           phone,
-          fulfillment: session.customer.location,
+          fulfillment: session.fulfillment,
           itemsText: cartLines(session.cart).join(", "),
           total: cartTotal(session.cart).toFixed(2),
         });
 
         await appendOrderRow({
           timestamp,
-          name: session.customer.name,
-          email: session.customer.email,
+          name: customer.name,
+          email: customer.email,
           phone,
-          fulfillment: session.customer.location,
+          fulfillment: session.fulfillment,
           itemsText: cartLines(session.cart).join("; "),
           total: cartTotal(session.cart).toFixed(2),
         });
@@ -350,14 +482,13 @@ async function handleIncoming(phone, input) {
         await sendText(phone, "No problem — your order has been cancelled. 👍\n\nType *menu* any time to browse again.");
         return null;
       }
-      await sendConfirmPrompt(phone, session);
+      await sendConfirmPrompt(phone, session, customer);
       return null;
     }
 
     default: {
       session = resetSession(phone);
-      session.state = "BROWSING_CATEGORY";
-      await sendCategoryList(phone);
+      await sendEntryScreen(phone, session);
       return null;
     }
   }
