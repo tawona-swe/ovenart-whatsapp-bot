@@ -9,7 +9,7 @@ function isConfigured() {
   return Boolean(
     process.env.GOOGLE_FORM_URL &&
       process.env.GOOGLE_FORM_ENTRY_NAME &&
-      process.env.GOOGLE_FORM_ENTRY_EMAIL &&
+      process.env.GOOGLE_FORM_ENTRY_CITY &&
       process.env.GOOGLE_FORM_ENTRY_PHONE &&
       process.env.GOOGLE_FORM_ENTRY_FULFILLMENT &&
       process.env.GOOGLE_FORM_ENTRY_ITEMS &&
@@ -22,7 +22,7 @@ function isConfigured() {
  * its linked Google Form) for the packing/dispatch team. No-ops quietly if
  * not configured, so this never blocks an order from completing in the chat.
  *
- * @param {{ timestamp: string, name: string, email: string, phone: string,
+ * @param {{ timestamp: string, name: string, city: string, phone: string,
  *           fulfillment: string, itemsText: string, total: string }} order
  */
 async function appendOrderRow(order) {
@@ -33,7 +33,7 @@ async function appendOrderRow(order) {
 
   const payload = querystring.stringify({
     [process.env.GOOGLE_FORM_ENTRY_NAME]: order.name,
-    [process.env.GOOGLE_FORM_ENTRY_EMAIL]: order.email,
+    [process.env.GOOGLE_FORM_ENTRY_CITY]: order.city,
     [process.env.GOOGLE_FORM_ENTRY_PHONE]: order.phone,
     [process.env.GOOGLE_FORM_ENTRY_FULFILLMENT]: order.fulfillment,
     [process.env.GOOGLE_FORM_ENTRY_ITEMS]: order.itemsText,

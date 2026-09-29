@@ -37,8 +37,6 @@ function nowCAT() {
   );
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 // ─── Registration ───────────────────────────────────────────────────────────
 
 async function sendRegisterPrompt(phone) {
@@ -73,10 +71,9 @@ async function sendCategoryList(phone) {
 async function sendSettingsMenu(phone, customer) {
   await sendButtons(
     phone,
-    `*Your details:*\n\nName: ${customer.name}\nEmail: ${customer.email}\nCity: ${customer.city}\n\nWhat would you like to update? (or type *menu* to go back)`,
+    `*Your details:*\n\nName: ${customer.name}\nCity: ${customer.city}\n\nWhat would you like to update? (or type *menu* to go back)`,
     [
       { id: "settings_edit_name", title: "Name" },
-      { id: "settings_edit_email", title: "Email" },
       { id: "settings_edit_city", title: "City" },
     ]
   );
@@ -167,7 +164,6 @@ async function sendConfirmPrompt(phone, session, customer) {
     "*Please confirm your order:*\n\n" +
     `${formatCart(session.cart)}\n\n` +
     `Name: ${customer.name}\n` +
-    `Email: ${customer.email}\n` +
     `${session.fulfillment}`;
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "✅ Confirm" },
@@ -247,19 +243,8 @@ async function handleIncoming(phone, input) {
         return null;
       }
       session.registerDraft = { name: text };
-      session.state = "REGISTER_EMAIL";
-      await sendText(phone, "Thanks! What's your email address?");
-      return null;
-    }
-
-    case "REGISTER_EMAIL": {
-      if (!text || !EMAIL_RE.test(text)) {
-        await sendText(phone, "Please enter a valid email address (e.g. name@example.com).");
-        return null;
-      }
-      session.registerDraft.email = text;
       session.state = "REGISTER_CITY";
-      await sendText(phone, "Almost done — which city are you in?");
+      await sendText(phone, "Thanks! Which city are you in?");
       return null;
     }
 
@@ -299,11 +284,6 @@ async function handleIncoming(phone, input) {
         await sendText(phone, "What should we update your name (or outlet name) to?");
         return null;
       }
-      if (lower === "settings_edit_email") {
-        session.state = "SETTINGS_EDIT_EMAIL";
-        await sendText(phone, "What should we update your email to?");
-        return null;
-      }
       if (lower === "settings_edit_city") {
         session.state = "SETTINGS_EDIT_CITY";
         await sendText(phone, "What should we update your city to?");
@@ -320,18 +300,6 @@ async function handleIncoming(phone, input) {
       }
       saveCustomer(phone, { name: text });
       await sendText(phone, "Name updated.");
-      session.state = "SETTINGS_MENU";
-      await sendSettingsMenu(phone, getCustomer(phone));
-      return null;
-    }
-
-    case "SETTINGS_EDIT_EMAIL": {
-      if (!text || !EMAIL_RE.test(text)) {
-        await sendText(phone, "Please enter a valid email address (e.g. name@example.com).");
-        return null;
-      }
-      saveCustomer(phone, { email: text });
-      await sendText(phone, "Email updated.");
       session.state = "SETTINGS_MENU";
       await sendSettingsMenu(phone, getCustomer(phone));
       return null;
@@ -446,7 +414,6 @@ async function handleIncoming(phone, input) {
         const orderSummary =
           `*New Order — ${timestamp}*\n\n` +
           `${customer.name}  (${phone})\n` +
-          `${customer.email}\n` +
           `${customer.city}\n` +
           `${session.fulfillment}\n\n` +
           formatCart(session.cart);
@@ -463,7 +430,7 @@ async function handleIncoming(phone, input) {
         await appendOrderRow({
           timestamp,
           name: customer.name,
-          email: customer.email,
+          city: customer.city,
           phone,
           fulfillment: session.fulfillment,
           itemsText: cartLines(session.cart).join("; "),
