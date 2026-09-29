@@ -1,7 +1,7 @@
-const { getProduct, getCategories, getProductsByCategorySlug } = require("./products");
+const { getProduct, PRODUCTS } = require("./products");
 const { getSession, resetSession } = require("./session");
 const { getCustomer, isRegistered, saveCustomer } = require("./customers");
-const { sendText, sendTemplate, sendList, sendButtons } = require("./whatsapp");
+const { sendText, sendTemplate, sendButtons, sendCatalog } = require("./whatsapp");
 const { appendOrderRow } = require("./ordersSheet");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,23 +49,13 @@ async function sendRegisterPrompt(phone) {
 
 // ─── Menu / Settings ─────────────────────────────────────────────────────────
 
-async function sendCategoryList(phone) {
-  const sections = [
-    {
-      title: "Menu",
-      rows: getCategories().map((c) => ({ id: `cat_${c.slug}`, title: c.label.slice(0, 24) })),
-    },
-    {
-      title: "Account",
-      rows: [{ id: "settings_open", title: "Settings" }],
-    },
-  ];
-  await sendList(
+async function sendMenu(phone) {
+  await sendCatalog(
     phone,
-    "Pick a category to browse, or type *cart* / *checkout* any time.",
-    "Browse menu",
-    sections
+    "Tap below to browse the menu — add items and quantities, then send your order when ready.",
+    String(PRODUCTS[0].id)
   );
+  await sendText(phone, "Type *settings* any time to update your name or city.");
 }
 
 async function sendSettingsMenu(phone, customer) {
@@ -77,41 +67,6 @@ async function sendSettingsMenu(phone, customer) {
       { id: "settings_edit_city", title: "City" },
     ]
   );
-}
-
-async function sendProductList(phone, categorySlug) {
-  const products = getProductsByCategorySlug(categorySlug);
-  const sections = [
-    {
-      title: "Products",
-      rows: products.map((p) => ({
-        id: `prod_${p.id}`,
-        title: p.name.slice(0, 24),
-        description: `$${p.price.toFixed(2)} — ${p.description}`.slice(0, 72),
-      })),
-    },
-  ];
-  await sendList(phone, "Choose a product to add to your cart:", "Choose product", sections);
-}
-
-async function sendQtyPrompt(phone, product) {
-  await sendButtons(
-    phone,
-    `*${product.name}* — $${product.price.toFixed(2)} each.\nHow many would you like? (or type a number)`,
-    [
-      { id: "qty_1", title: "1" },
-      { id: "qty_2", title: "2" },
-      { id: "qty_3", title: "3" },
-    ]
-  );
-}
-
-async function sendCartActions(phone, cart) {
-  await sendButtons(phone, `*Cart updated:*\n\n${formatCart(cart)}`, [
-    { id: "action_more", title: "Add more" },
-    { id: "action_cart", title: "View cart" },
-    { id: "action_checkout", title: "Checkout" },
-  ]);
 }
 
 async function sendFulfillmentPrompt(phone) {
@@ -171,15 +126,48 @@ async function sendConfirmPrompt(phone, session, customer) {
   ]);
 }
 
-/** Send whichever entry screen fits: register (new) or menu+settings (returning). */
+/** Send whichever entry screen fits: register (new) or the catalog menu (returning). */
 async function sendEntryScreen(phone, session) {
   if (!isRegistered(phone)) {
     session.state = "REGISTER_START";
     await sendRegisterPrompt(phone);
     return;
   }
-  session.state = "BROWSING_CATEGORY";
-  await sendCategoryList(phone);
+  session.state = "MENU_SENT";
+  await sendMenu(phone);
+}
+
+/**
+ * Handle a submitted WhatsApp catalog cart (webhook message.type === "order").
+ * Builds the session cart from the order's product_items and jumps straight
+ * to checkout — no per-item round trips through the bot.
+ *
+ * @param {string} phone
+ * @param {{ product_items: Array<{ product_retailer_id: string, quantity: number }> }} order
+ */
+async function handleCatalogOrder(phone, order) {
+  const cart = (order.product_items || [])
+    .map((item) => ({ id: Number(item.product_retailer_id), qty: item.quantity }))
+    .filter((line) => Number.isInteger(line.qty) && line.qty > 0 && getProduct(line.id));
+
+  if (cart.length === 0) {
+    await sendText(phone, "That order didn't come through with any recognised items — please try again.");
+    return;
+  }
+
+  const session = getSession(phone);
+  session.cart = cart;
+
+  if (!isRegistered(phone)) {
+    // Keep the cart waiting through registration, then resume checkout.
+    session.pendingCartAfterRegister = true;
+    session.state = "REGISTER_START";
+    await sendRegisterPrompt(phone);
+    return;
+  }
+
+  session.state = "CHECKOUT_FULFILLMENT";
+  await sendFulfillmentPrompt(phone);
 }
 
 // ─── Global commands (recognised in every state) ──────────────────────────────
@@ -207,16 +195,13 @@ async function handleIncoming(phone, input) {
     return null;
   }
 
-  // "cart" / "checkout" work as typed shortcuts from anywhere in browsing —
-  // only meaningful for a registered customer with an active cart.
-  if (isRegistered(phone) && lower === "cart") {
-    await sendCartActions(phone, session.cart);
-    session.state = "CART_ACTIONS";
+  if (isRegistered(phone) && lower === "settings") {
+    session.state = "SETTINGS_MENU";
+    await sendSettingsMenu(phone, getCustomer(phone));
     return null;
   }
-  if (isRegistered(phone) && lower === "checkout" && session.cart.length > 0) {
-    session.state = "CHECKOUT_FULFILLMENT";
-    await sendFulfillmentPrompt(phone);
+  if (isRegistered(phone) && lower === "cart") {
+    await sendText(phone, formatCart(session.cart));
     return null;
   }
 
@@ -255,29 +240,21 @@ async function handleIncoming(phone, input) {
       }
       const customer = saveCustomer(phone, { ...session.registerDraft, city: text });
       session.registerDraft = null;
-      await sendText(phone, `You're registered, ${customer.name}! Here's the menu:`);
-      session.state = "BROWSING_CATEGORY";
-      await sendCategoryList(phone);
+      await sendText(phone, `You're registered, ${customer.name}!`);
+
+      if (session.pendingCartAfterRegister && session.cart.length > 0) {
+        session.pendingCartAfterRegister = false;
+        session.state = "CHECKOUT_FULFILLMENT";
+        await sendFulfillmentPrompt(phone);
+        return null;
+      }
+
+      session.state = "MENU_SENT";
+      await sendMenu(phone);
       return null;
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────
-    case "BROWSING_CATEGORY": {
-      if (lower === "settings_open") {
-        session.state = "SETTINGS_MENU";
-        await sendSettingsMenu(phone, getCustomer(phone));
-        return null;
-      }
-      if (lower.startsWith("cat_")) {
-        const slug = lower.slice(4);
-        session.state = "BROWSING_PRODUCT";
-        await sendProductList(phone, slug);
-        return null;
-      }
-      await sendCategoryList(phone);
-      return null;
-    }
-
     case "SETTINGS_MENU": {
       if (lower === "settings_edit_name") {
         session.state = "SETTINGS_EDIT_NAME";
@@ -317,68 +294,7 @@ async function handleIncoming(phone, input) {
       return null;
     }
 
-    // ── Browsing / cart ──────────────────────────────────────────────────────
-    case "BROWSING_PRODUCT": {
-      if (lower.startsWith("prod_")) {
-        const product = getProduct(lower.slice(5));
-        if (product) {
-          session.pendingItemId = product.id;
-          session.state = "AWAITING_QTY";
-          await sendQtyPrompt(phone, product);
-          return null;
-        }
-      }
-      await sendCategoryList(phone);
-      session.state = "BROWSING_CATEGORY";
-      return null;
-    }
-
-    case "AWAITING_QTY": {
-      const qtyMatch = lower.match(/^qty_(\d+)$/);
-      const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : parseInt(text, 10);
-      if (!Number.isInteger(qty) || qty <= 0) {
-        await sendText(phone, "Please reply with a valid quantity — e.g. 1, 2, 3.");
-        return null;
-      }
-      const product = getProduct(session.pendingItemId);
-      const existing = session.cart.find((l) => l.id === product.id);
-      if (existing) {
-        existing.qty += qty;
-      } else {
-        session.cart.push({ id: product.id, qty });
-      }
-      session.pendingItemId = null;
-      session.state = "CART_ACTIONS";
-      await sendCartActions(phone, session.cart);
-      return null;
-    }
-
-    case "CART_ACTIONS": {
-      if (lower === "action_more") {
-        session.state = "BROWSING_CATEGORY";
-        await sendCategoryList(phone);
-        return null;
-      }
-      if (lower === "action_cart") {
-        await sendCartActions(phone, session.cart);
-        return null;
-      }
-      if (lower === "action_checkout") {
-        if (session.cart.length === 0) {
-          await sendText(phone, "Your cart is empty. Add something first.");
-          session.state = "BROWSING_CATEGORY";
-          await sendCategoryList(phone);
-          return null;
-        }
-        session.state = "CHECKOUT_FULFILLMENT";
-        await sendFulfillmentPrompt(phone);
-        return null;
-      }
-      await sendCartActions(phone, session.cart);
-      return null;
-    }
-
-    // ── Checkout — name/email already known from registration ─────────────────
+    // ── Checkout — cart arrives pre-built from the catalog order ──────────────
     case "CHECKOUT_FULFILLMENT": {
       if (lower === "fulfillment_pickup") {
         session.fulfillment = "Pickup";
@@ -461,4 +377,4 @@ async function handleIncoming(phone, input) {
   }
 }
 
-module.exports = { handleIncoming };
+module.exports = { handleIncoming, handleCatalogOrder };

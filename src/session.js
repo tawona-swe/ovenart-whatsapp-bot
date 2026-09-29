@@ -4,15 +4,25 @@
 // preserve in-flight orders.
 const sessions = new Map();
 
+function freshSession() {
+  return {
+    state: "START",
+    cart: [],
+    registerDraft: null,
+    fulfillment: null,
+    pendingCartAfterRegister: false,
+  };
+}
+
 function getSession(phone) {
   if (!sessions.has(phone)) {
-    sessions.set(phone, { state: "START", cart: [], registerDraft: null, fulfillment: null });
+    sessions.set(phone, freshSession());
   }
   return sessions.get(phone);
 }
 
 function resetSession(phone) {
-  const fresh = { state: "START", cart: [], registerDraft: null, fulfillment: null };
+  const fresh = freshSession();
   sessions.set(phone, fresh);
   return fresh;
 }

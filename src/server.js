@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const { handleIncoming } = require("./orderFlow");
+const { handleIncoming, handleCatalogOrder } = require("./orderFlow");
 const { sendText } = require("./whatsapp");
 
 // ─── Startup env check ───────────────────────────────────────────────────────
@@ -59,6 +59,14 @@ app.post("/webhook", async (req, res) => {
       const messages = value.messages ?? [];
       for (const message of messages) {
         const from = message.from; // customer's WhatsApp number, e.g. 26377xxxxxxx
+
+        // A submitted catalog cart — skip straight to checkout with the
+        // items the customer picked natively in WhatsApp's catalog UI.
+        if (message.type === "order") {
+          console.log(`[webhook] ← ${from}: order (${message.order?.product_items?.length ?? 0} items)`);
+          await handleCatalogOrder(from, message.order);
+          continue;
+        }
 
         // Normalize the different inbound shapes into one input string:
         // typed text stays as-is, a tapped list row or button becomes its id.

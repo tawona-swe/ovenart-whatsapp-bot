@@ -273,4 +273,53 @@ async function sendButtons(to, bodyText, buttons) {
   }
 }
 
-module.exports = { sendText, sendTemplate, sendFlow, sendList, sendButtons };
+/**
+ * Send a WhatsApp Catalog Message — opens the connected product catalog with
+ * WhatsApp's own native browse/quantity/cart UI. The customer's submitted
+ * cart arrives back at the webhook as a message of type "order".
+ *
+ * @param {string} to
+ * @param {string} bodyText
+ * @param {string} thumbnailRetailerId - retailer_id of the product shown as the header thumbnail
+ */
+async function sendCatalog(to, bodyText, thumbnailRetailerId) {
+  const { WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID } = process.env;
+  const url = `${GRAPH_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+  try {
+    await axios.post(
+      url,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "catalog_message",
+          body: { text: bodyText },
+          action: {
+            name: "catalog_message",
+            parameters: { thumbnail_product_retailer_id: thumbnailRetailerId },
+          },
+          footer: { text: "Oven Art Bakery" },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  } catch (err) {
+    const metaError = err.response?.data;
+    if (metaError) {
+      throw new Error(
+        `[whatsapp] Meta API error sending catalog to ${to} — code ${metaError?.error?.code}: ${metaError?.error?.message}\n` +
+          JSON.stringify(metaError, null, 2)
+      );
+    }
+    throw new Error(`[whatsapp] Network error sending catalog to ${to}: ${err.message}`);
+  }
+}
+
+module.exports = { sendText, sendTemplate, sendFlow, sendList, sendButtons, sendCatalog };

@@ -121,6 +121,20 @@ const PRODUCTS = [
   },
 ];
 
+// Placeholder catalog images, one per category, sourced from Wikimedia
+// Commons (public domain / CC-licensed) until Oven Art sends real product
+// photos. Swap these out per-product in PRODUCTS (add an `image` field) once
+// real photos are available — getImageUrl() checks that first.
+const CATEGORY_IMAGES = {
+  "🍞 BREAD": "https://upload.wikimedia.org/wikipedia/commons/6/67/Loaf_of_sourdough_bread_cooling.jpg",
+  "🍕 FROZEN PIZZA": "https://upload.wikimedia.org/wikipedia/commons/2/20/Frozen_Celeste_Pizza_For_One_June_2018.jpg",
+  "🌯 TORTILLA WRAPS": "https://upload.wikimedia.org/wikipedia/commons/0/05/Tortilla.JPG",
+};
+
+function getImageUrl(product) {
+  return product.image || CATEGORY_IMAGES[product.category];
+}
+
 function getProduct(id) {
   return PRODUCTS.find((p) => p.id === Number(id));
 }
@@ -181,4 +195,5 @@ module.exports = {
   flowProductOptions,
   getCategories,
   getProductsByCategorySlug,
+  getImageUrl,
 };
