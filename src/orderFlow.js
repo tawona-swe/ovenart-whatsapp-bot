@@ -234,7 +234,7 @@ async function handleIncoming(phone, input) {
     case "REGISTER_START": {
       if (lower === "register_start") {
         session.state = "REGISTER_NAME";
-        await sendText(phone, "What's your name?");
+        await sendText(phone, "What's your name, or the name of your outlet?");
         return null;
       }
       await sendRegisterPrompt(phone);
@@ -296,7 +296,7 @@ async function handleIncoming(phone, input) {
     case "SETTINGS_MENU": {
       if (lower === "settings_edit_name") {
         session.state = "SETTINGS_EDIT_NAME";
-        await sendText(phone, "What should we update your name to?");
+        await sendText(phone, "What should we update your name (or outlet name) to?");
         return null;
       }
       if (lower === "settings_edit_email") {
