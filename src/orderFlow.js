@@ -20,7 +20,7 @@ function cartLines(cart) {
 function formatCart(cart) {
   if (cart.length === 0) return "Your cart is empty.";
   const lines = cartLines(cart).map((l) => `• ${l}`);
-  return lines.join("\n") + `\n\n💰 Total: $${cartTotal(cart).toFixed(2)}`;
+  return lines.join("\n") + `\n\nTotal: $${cartTotal(cart).toFixed(2)}`;
 }
 
 function nowCAT() {
@@ -44,8 +44,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 async function sendRegisterPrompt(phone) {
   await sendButtons(
     phone,
-    "👋 Welcome to *Oven Art Bakery*! Looks like this is your first time here — let's get you registered (takes 10 seconds).",
-    [{ id: "register_start", title: "📝 Register" }]
+    "Welcome to *Oven Art Bakery*! Looks like this is your first time here — let's get you registered (takes 10 seconds).",
+    [{ id: "register_start", title: "Register" }]
   );
 }
 
@@ -59,7 +59,7 @@ async function sendCategoryList(phone) {
     },
     {
       title: "Account",
-      rows: [{ id: "settings_open", title: "⚙️ Settings" }],
+      rows: [{ id: "settings_open", title: "Settings" }],
     },
   ];
   await sendList(
@@ -73,7 +73,7 @@ async function sendCategoryList(phone) {
 async function sendSettingsMenu(phone, customer) {
   await sendButtons(
     phone,
-    `⚙️ *Your details:*\n\n👤 ${customer.name}\n✉️ ${customer.email}\n📍 ${customer.city}\n\nWhat would you like to update? (or type *menu* to go back)`,
+    `*Your details:*\n\nName: ${customer.name}\nEmail: ${customer.email}\nCity: ${customer.city}\n\nWhat would you like to update? (or type *menu* to go back)`,
     [
       { id: "settings_edit_name", title: "Name" },
       { id: "settings_edit_email", title: "Email" },
@@ -110,7 +110,7 @@ async function sendQtyPrompt(phone, product) {
 }
 
 async function sendCartActions(phone, cart) {
-  await sendButtons(phone, `🛒 *Cart updated:*\n\n${formatCart(cart)}`, [
+  await sendButtons(phone, `*Cart updated:*\n\n${formatCart(cart)}`, [
     { id: "action_more", title: "Add more" },
     { id: "action_cart", title: "View cart" },
     { id: "action_checkout", title: "Checkout" },
@@ -119,8 +119,8 @@ async function sendCartActions(phone, cart) {
 
 async function sendFulfillmentPrompt(phone) {
   await sendButtons(phone, "Is this order for pickup or delivery?", [
-    { id: "fulfillment_pickup", title: "🏬 Pickup" },
-    { id: "fulfillment_delivery", title: "🚚 Delivery" },
+    { id: "fulfillment_pickup", title: "Pickup" },
+    { id: "fulfillment_delivery", title: "Delivery" },
   ]);
 }
 
@@ -164,11 +164,11 @@ async function notifyBakery({ orderSummary, name, phone, fulfillment, itemsText,
 
 async function sendConfirmPrompt(phone, session, customer) {
   const summary =
-    "📋 *Please confirm your order:*\n\n" +
+    "*Please confirm your order:*\n\n" +
     `${formatCart(session.cart)}\n\n` +
-    `👤 Name: ${customer.name}\n` +
-    `✉️ Email: ${customer.email}\n` +
-    `📍 ${session.fulfillment}`;
+    `Name: ${customer.name}\n` +
+    `Email: ${customer.email}\n` +
+    `${session.fulfillment}`;
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "✅ Confirm" },
     { id: "confirm_no", title: "❌ Cancel" },
@@ -270,7 +270,7 @@ async function handleIncoming(phone, input) {
       }
       const customer = saveCustomer(phone, { ...session.registerDraft, city: text });
       session.registerDraft = null;
-      await sendText(phone, `🎉 You're registered, ${customer.name}! Here's the menu:`);
+      await sendText(phone, `You're registered, ${customer.name}! Here's the menu:`);
       session.state = "BROWSING_CATEGORY";
       await sendCategoryList(phone);
       return null;
@@ -319,7 +319,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       saveCustomer(phone, { name: text });
-      await sendText(phone, "✅ Name updated.");
+      await sendText(phone, "Name updated.");
       session.state = "SETTINGS_MENU";
       await sendSettingsMenu(phone, getCustomer(phone));
       return null;
@@ -331,7 +331,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       saveCustomer(phone, { email: text });
-      await sendText(phone, "✅ Email updated.");
+      await sendText(phone, "Email updated.");
       session.state = "SETTINGS_MENU";
       await sendSettingsMenu(phone, getCustomer(phone));
       return null;
@@ -343,7 +343,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       saveCustomer(phone, { city: text });
-      await sendText(phone, "✅ City updated.");
+      await sendText(phone, "City updated.");
       session.state = "SETTINGS_MENU";
       await sendSettingsMenu(phone, getCustomer(phone));
       return null;
@@ -397,7 +397,7 @@ async function handleIncoming(phone, input) {
       }
       if (lower === "action_checkout") {
         if (session.cart.length === 0) {
-          await sendText(phone, "Your cart is empty 😊 Add something first.");
+          await sendText(phone, "Your cart is empty. Add something first.");
           session.state = "BROWSING_CATEGORY";
           await sendCategoryList(phone);
           return null;
@@ -444,11 +444,11 @@ async function handleIncoming(phone, input) {
       if (lower === "confirm_yes") {
         const timestamp = nowCAT();
         const orderSummary =
-          `🆕 *New Order — ${timestamp}*\n\n` +
-          `👤 ${customer.name}  (${phone})\n` +
-          `✉️ ${customer.email}\n` +
-          `🏙️ ${customer.city}\n` +
-          `📍 ${session.fulfillment}\n\n` +
+          `*New Order — ${timestamp}*\n\n` +
+          `${customer.name}  (${phone})\n` +
+          `${customer.email}\n` +
+          `${customer.city}\n` +
+          `${session.fulfillment}\n\n` +
           formatCart(session.cart);
 
         await notifyBakery({
@@ -473,13 +473,13 @@ async function handleIncoming(phone, input) {
         resetSession(phone);
         await sendText(
           phone,
-          "🎉 *Order confirmed!* Thank you!\n\nThe Oven Art team has received your order and will be in touch shortly.\n\nType *menu* any time to start a new order. 🍞"
+          "*Order confirmed!* Thank you.\n\nThe Oven Art team has received your order and will be in touch shortly.\n\nType *menu* any time to start a new order."
         );
         return null;
       }
       if (lower === "confirm_no") {
         resetSession(phone);
-        await sendText(phone, "No problem — your order has been cancelled. 👍\n\nType *menu* any time to browse again.");
+        await sendText(phone, "No problem — your order has been cancelled.\n\nType *menu* any time to browse again.");
         return null;
       }
       await sendConfirmPrompt(phone, session, customer);
