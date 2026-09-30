@@ -55,7 +55,7 @@ async function sendMenu(phone) {
     "Tap below to browse the menu — add items and quantities, then send your order when ready.",
     String(PRODUCTS[0].id)
   );
-  await sendText(phone, "Type *settings* any time to update your name or city.");
+  await sendButtons(phone, "Need to update your details?", [{ id: "settings", title: "Settings" }]);
 }
 
 async function sendSettingsMenu(phone, customer) {
