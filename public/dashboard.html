@@ -123,6 +123,27 @@ async function loadConversations() {
 async function openConversation(phone) {
   activePhone = phone;
   await loadConversations();
+
+  // Build the chrome (header + reply bar) ONCE per conversation switch —
+  // the poll below only touches the message list, so it never wipes
+  // whatever the sales person is mid-typing into the reply box.
+  document.getElementById("thread-wrap").innerHTML = `
+    <div id="thread-header">
+      <div><strong id="thread-name"></strong> — <span id="thread-phone"></span></div>
+      <div id="thread-status" class="status"></div>
+    </div>
+    <div id="thread"></div>
+    <div id="reply-warning">This conversation's 24h window is closed — a message sent now would need an approved template.</div>
+    <div id="reply-bar">
+      <textarea id="reply-text" rows="1" placeholder="Type a reply..."></textarea>
+      <button id="reply-send">Send</button>
+    </div>
+  `;
+  document.getElementById("reply-send").addEventListener("click", sendReply);
+  document.getElementById("reply-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); }
+  });
+
   await loadThread();
   clearInterval(pollTimer);
   pollTimer = setInterval(loadThread, 4000);
@@ -133,31 +154,23 @@ async function loadThread() {
   const res = await api(`/api/conversations/${encodeURIComponent(activePhone)}/messages`);
   const data = await res.json();
 
-  document.getElementById("thread-wrap").innerHTML = `
-    <div id="thread-header">
-      <div><strong>${esc(data.name || activePhone)}</strong> — ${activePhone}</div>
-      <div class="status ${data.windowOpen ? "open" : "closed"}">${data.windowOpen ? "Window open — free replies" : "Window closed — needs a template to message first"}</div>
-    </div>
-    <div id="thread"></div>
-    <div id="reply-warning">This conversation's 24h window is closed — a message sent now would need an approved template.</div>
-    <div id="reply-bar">
-      <textarea id="reply-text" rows="1" placeholder="Type a reply..." ${data.windowOpen ? "" : "disabled"}></textarea>
-      <button id="reply-send" ${data.windowOpen ? "" : "disabled"}>Send</button>
-    </div>
-  `;
+  document.getElementById("thread-name").textContent = data.name || activePhone;
+  document.getElementById("thread-phone").textContent = activePhone;
+  const statusEl = document.getElementById("thread-status");
+  statusEl.className = `status ${data.windowOpen ? "open" : "closed"}`;
+  statusEl.textContent = data.windowOpen ? "Window open — free replies" : "Window closed — needs a template to message first";
 
   const threadEl = document.getElementById("thread");
+  const wasAtBottom = threadEl.scrollTop + threadEl.clientHeight >= threadEl.scrollHeight - 20;
   threadEl.innerHTML = data.messages.map((m) => `
     <div class="bubble ${m.direction}">${esc(m.text)}<span class="time">${fmtTime(m.at)}</span></div>
   `).join("");
-  threadEl.scrollTop = threadEl.scrollHeight;
+  if (wasAtBottom) threadEl.scrollTop = threadEl.scrollHeight;
 
   document.getElementById("reply-warning").style.display = data.windowOpen ? "none" : "block";
-
-  document.getElementById("reply-send").addEventListener("click", sendReply);
-  document.getElementById("reply-text").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); }
-  });
+  // Only touch enabled state, never .value — never disturb text mid-typing.
+  document.getElementById("reply-text").disabled = !data.windowOpen;
+  document.getElementById("reply-send").disabled = !data.windowOpen;
 }
 
 async function sendReply() {
