@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oven Art — Inbox</title>
+<style>
+  :root {
+    --bg: #f4f3f1;
+    --panel: #ffffff;
+    --border: #e2ddd6;
+    --ink: #241f1a;
+    --muted: #7a7166;
+    --accent: #b9860c;
+    --open: #2f8f5b;
+    --closed: #b23a3a;
+    --bubble-in: #efece7;
+    --bubble-out: #fdf1d6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    height: 100vh;
+    display: flex;
+  }
+  #list {
+    width: 320px;
+    min-width: 240px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  #list h1 {
+    font-size: 15px;
+    padding: 16px;
+    margin: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .convo {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .convo:hover { background: var(--bg); }
+  .convo.active { background: var(--bubble-out); }
+  .convo .name { font-weight: 600; font-size: 14px; }
+  .convo .phone { font-size: 12px; color: var(--muted); }
+  .convo .preview { font-size: 12.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+  .dot.open { background: var(--open); }
+  .dot.closed { background: var(--closed); }
+
+  #thread-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #thread-header {
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  #thread-header .status { font-size: 12px; margin-top: 2px; }
+  #thread-header .status.open { color: var(--open); }
+  #thread-header .status.closed { color: var(--closed); }
+
+  #thread { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .bubble { max-width: 60%; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+  .bubble.in { align-self: flex-start; background: var(--bubble-in); }
+  .bubble.out { align-self: flex-end; background: var(--bubble-out); }
+  .bubble .time { display: block; font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+
+  #reply-bar { padding: 14px 20px; background: var(--panel); border-top: 1px solid var(--border); display: flex; gap: 10px; }
+  #reply-text { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; resize: none; font-family: inherit; }
+  #reply-send { padding: 0 20px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+  #reply-send:disabled { background: #cfc8ba; cursor: not-allowed; }
+  #reply-warning { padding: 8px 20px; font-size: 12.5px; color: var(--closed); background: #fbe1e1; display: none; }
+
+  #empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+  <div id="list"><h1>Conversations</h1></div>
+  <div id="thread-wrap">
+    <div id="empty">Select a conversation</div>
+  </div>
+
+<script>
+let activePhone = null;
+let pollTimer = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (res.status === 401) { document.body.innerHTML = "Auth required — reload the page."; throw new Error("401"); }
+  return res;
+}
+
+function esc(s) {
+  return (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+function fmtTime(ts) {
+  return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadConversations() {
+  const res = await api("/api/conversations");
+  const list = await res.json();
+  const el = document.getElementById("list");
+  el.innerHTML = "<h1>Conversations</h1>" + list.map((c) => `
+    <div class="convo ${c.phone === activePhone ? "active" : ""}" data-phone="${c.phone}">
+      <div class="name"><span class="dot ${c.windowOpen ? "open" : "closed"}"></span>${esc(c.name || c.phone)}</div>
+      <div class="phone">${c.phone}</div>
+      <div class="preview">${esc(c.lastMessage ? c.lastMessage.text : "")}</div>
+    </div>
+  `).join("");
+  el.querySelectorAll(".convo").forEach((row) => {
+    row.addEventListener("click", () => openConversation(row.dataset.phone));
+  });
+}
+
+async function openConversation(phone) {
+  activePhone = phone;
+  await loadConversations();
+  await loadThread();
+  clearInterval(pollTimer);
+  pollTimer = setInterval(loadThread, 4000);
+}
+
+async function loadThread() {
+  if (!activePhone) return;
+  const res = await api(`/api/conversations/${encodeURIComponent(activePhone)}/messages`);
+  const data = await res.json();
+
+  document.getElementById("thread-wrap").innerHTML = `
+    <div id="thread-header">
+      <div><strong>${esc(data.name || activePhone)}</strong> — ${activePhone}</div>
+      <div class="status ${data.windowOpen ? "open" : "closed"}">${data.windowOpen ? "Window open — free replies" : "Window closed — needs a template to message first"}</div>
+    </div>
+    <div id="thread"></div>
+    <div id="reply-warning">This conversation's 24h window is closed — a message sent now would need an approved template.</div>
+    <div id="reply-bar">
+      <textarea id="reply-text" rows="1" placeholder="Type a reply..." ${data.windowOpen ? "" : "disabled"}></textarea>
+      <button id="reply-send" ${data.windowOpen ? "" : "disabled"}>Send</button>
+    </div>
+  `;
+
+  const threadEl = document.getElementById("thread");
+  threadEl.innerHTML = data.messages.map((m) => `
+    <div class="bubble ${m.direction}">${esc(m.text)}<span class="time">${fmtTime(m.at)}</span></div>
+  `).join("");
+  threadEl.scrollTop = threadEl.scrollHeight;
+
+  document.getElementById("reply-warning").style.display = data.windowOpen ? "none" : "block";
+
+  document.getElementById("reply-send").addEventListener("click", sendReply);
+  document.getElementById("reply-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); }
+  });
+}
+
+async function sendReply() {
+  const textEl = document.getElementById("reply-text");
+  const text = textEl.value.trim();
+  if (!text) return;
+  textEl.disabled = true;
+  const res = await api(`/api/conversations/${encodeURIComponent(activePhone)}/reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (res.ok) {
+    textEl.value = "";
+    await loadThread();
+  } else {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || "Failed to send.");
+  }
+  textEl.disabled = false;
+  textEl.focus();
+}
+
+loadConversations();
+setInterval(loadConversations, 5000);
+</script>
+</body>
+</html>

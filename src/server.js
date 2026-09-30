@@ -1,7 +1,10 @@
 require("dotenv").config();
+const path = require("path");
 const express = require("express");
 const { handleIncoming, handleCatalogOrder } = require("./orderFlow");
 const { sendText } = require("./whatsapp");
+const { recordInbound, isWindowOpen, getThread, listConversations } = require("./conversations");
+const { getCustomer } = require("./customers");
 
 // ─── Startup env check ───────────────────────────────────────────────────────
 const requiredEnv = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN"];
@@ -63,19 +66,27 @@ app.post("/webhook", async (req, res) => {
         // A submitted catalog cart — skip straight to checkout with the
         // items the customer picked natively in WhatsApp's catalog UI.
         if (message.type === "order") {
-          console.log(`[webhook] ← ${from}: order (${message.order?.product_items?.length ?? 0} items)`);
+          const items = message.order?.product_items ?? [];
+          const total = items.reduce((sum, i) => sum + (i.item_price || 0) * (i.quantity || 0), 0);
+          recordInbound(from, `[Catalog order: ${items.length} items, $${total.toFixed(2)}]`);
+          console.log(`[webhook] ← ${from}: order (${items.length} items)`);
           await handleCatalogOrder(from, message.order);
           continue;
         }
 
         // Normalize the different inbound shapes into one input string:
         // typed text stays as-is, a tapped list row or button becomes its id.
+        // For the dashboard log we prefer the human-readable title when one
+        // exists (a tapped button/row), falling back to the id or raw text.
         let input = null;
+        let displayText = null;
         if (message.type === "text") {
           input = message.text.body;
+          displayText = input;
         } else if (message.type === "interactive") {
-          input =
-            message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
+          const reply = message.interactive?.list_reply ?? message.interactive?.button_reply;
+          input = reply?.id ?? null;
+          displayText = reply?.title ?? input;
         }
 
         if (input === null) {
@@ -87,6 +98,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
+        recordInbound(from, displayText);
         console.log(`[webhook] ← ${from}: ${input}`);
         await handleIncoming(from, input);
       }
@@ -95,6 +107,61 @@ app.post("/webhook", async (req, res) => {
     // Log the full Meta API error body if it came from Axios, otherwise log the raw error.
     const detail = err.response?.data ?? err.message ?? err;
     console.error("[webhook] error processing message:", JSON.stringify(detail, null, 2));
+  }
+});
+
+// ─── Sales dashboard — live inbox, protected by HTTP Basic Auth ───────────────
+function requireDashboardAuth(req, res, next) {
+  const { DASHBOARD_USERNAME, DASHBOARD_PASSWORD } = process.env;
+  if (!DASHBOARD_USERNAME || !DASHBOARD_PASSWORD) {
+    return res.status(503).send("Dashboard not configured — set DASHBOARD_USERNAME/DASHBOARD_PASSWORD.");
+  }
+
+  const header = req.headers.authorization || "";
+  const [scheme, encoded] = header.split(" ");
+  if (scheme === "Basic" && encoded) {
+    const [user, pass] = Buffer.from(encoded, "base64").toString().split(":");
+    if (user === DASHBOARD_USERNAME && pass === DASHBOARD_PASSWORD) return next();
+  }
+
+  res.set("WWW-Authenticate", 'Basic realm="Oven Art Dashboard"');
+  return res.sendStatus(401);
+}
+
+app.get("/dashboard", requireDashboardAuth, (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
+});
+app.use("/api", requireDashboardAuth);
+
+app.get("/api/conversations", (_req, res) => {
+  const list = listConversations().map((c) => ({
+    ...c,
+    name: getCustomer(c.phone)?.name ?? null,
+  }));
+  res.json(list);
+});
+
+app.get("/api/conversations/:phone/messages", (req, res) => {
+  res.json({
+    messages: getThread(req.params.phone),
+    windowOpen: isWindowOpen(req.params.phone),
+    name: getCustomer(req.params.phone)?.name ?? null,
+  });
+});
+
+app.post("/api/conversations/:phone/reply", async (req, res) => {
+  const { phone } = req.params;
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: "text is required" });
+  if (!isWindowOpen(phone)) {
+    return res.status(409).json({ error: "Outside the 24h window — a template is required to message first." });
+  }
+  try {
+    await sendText(phone, text.trim());
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[dashboard] failed to send reply:", err.message);
+    res.status(502).json({ error: "Failed to send — see server logs." });
   }
 });
 
