@@ -121,8 +121,8 @@ async function sendConfirmPrompt(phone, session, customer) {
     `Name: ${customer.name}\n` +
     `${session.fulfillment}`;
   await sendButtons(phone, summary, [
-    { id: "confirm_yes", title: "✅ Confirm" },
-    { id: "confirm_no", title: "❌ Cancel" },
+    { id: "confirm_yes", title: "Confirm" },
+    { id: "confirm_no", title: "Cancel" },
   ]);
 }
 
