@@ -6,8 +6,14 @@ const { appendOrderRow } = require("./ordersSheet");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const MIN_ITEMS_FOR_DELIVERY = 10;
+
 function cartTotal(cart) {
   return cart.reduce((sum, line) => sum + getProduct(line.id).price * line.qty, 0);
+}
+
+function cartItemCount(cart) {
+  return cart.reduce((sum, line) => sum + line.qty, 0);
 }
 
 function cartLines(cart) {
@@ -69,7 +75,15 @@ async function sendSettingsMenu(phone, customer) {
   );
 }
 
-async function sendFulfillmentPrompt(phone) {
+async function sendFulfillmentPrompt(phone, cart) {
+  if (cartItemCount(cart) < MIN_ITEMS_FOR_DELIVERY) {
+    await sendButtons(
+      phone,
+      `Delivery is available for orders of ${MIN_ITEMS_FOR_DELIVERY}+ items. This order qualifies for pickup only.`,
+      [{ id: "fulfillment_pickup", title: "Pickup" }]
+    );
+    return;
+  }
   await sendButtons(phone, "Is this order for pickup or delivery?", [
     { id: "fulfillment_pickup", title: "Pickup" },
     { id: "fulfillment_delivery", title: "Delivery" },
@@ -167,7 +181,7 @@ async function handleCatalogOrder(phone, order) {
   }
 
   session.state = "CHECKOUT_FULFILLMENT";
-  await sendFulfillmentPrompt(phone);
+  await sendFulfillmentPrompt(phone, session.cart);
 }
 
 // ─── Global commands (recognised in every state) ──────────────────────────────
@@ -245,7 +259,7 @@ async function handleIncoming(phone, input) {
       if (session.pendingCartAfterRegister && session.cart.length > 0) {
         session.pendingCartAfterRegister = false;
         session.state = "CHECKOUT_FULFILLMENT";
-        await sendFulfillmentPrompt(phone);
+        await sendFulfillmentPrompt(phone, session.cart);
         return null;
       }
 
@@ -303,11 +317,15 @@ async function handleIncoming(phone, input) {
         return null;
       }
       if (lower === "fulfillment_delivery") {
+        if (cartItemCount(session.cart) < MIN_ITEMS_FOR_DELIVERY) {
+          await sendFulfillmentPrompt(phone, session.cart);
+          return null;
+        }
         session.state = "CHECKOUT_ADDRESS";
         await sendText(phone, "Please share your delivery address.");
         return null;
       }
-      await sendFulfillmentPrompt(phone);
+      await sendFulfillmentPrompt(phone, session.cart);
       return null;
     }
 
