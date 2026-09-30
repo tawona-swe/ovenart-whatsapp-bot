@@ -9,6 +9,7 @@ Google Form's built-in ability to write its responses straight into a Sheet.
 2. Name it something like "Oven Art Orders".
 3. Add these questions, all as **Short answer** except Items (**Paragraph**):
    - Customer Name
+   - Address
    - City
    - Phone
    - Fulfillment
@@ -30,13 +31,14 @@ that sheet with your packing/dispatch team like any normal Google Sheet.
 
 1. Still in the form editor, click the **⋮** menu (top right) → **Get pre-filled link**.
 2. Type something recognisable into each field (e.g. "NAMEFIELD" into
-   Customer Name, "CITYFIELD" into City, etc.) so you can spot them later.
+   Customer Name, "ADDRESSFIELD" into Address, "CITYFIELD" into City, etc.)
+   so you can spot them later.
 3. Click **Get link**, then **Copy link**.
 4. Paste that link somewhere you can read it (e.g. a text editor). It looks
    like:
 
    ```
-   https://docs.google.com/forms/d/e/1FAIpQLSc.../viewform?usp=pp_url&entry.123456789=NAMEFIELD&entry.987654321=CITYFIELD&...
+   https://docs.google.com/forms/d/e/1FAIpQLSc.../viewform?usp=pp_url&entry.123456789=NAMEFIELD&entry.222333444=ADDRESSFIELD&entry.987654321=CITYFIELD&...
    ```
 
 5. From that URL:
@@ -46,11 +48,11 @@ that sheet with your packing/dispatch team like any normal Google Sheet.
    - **`GOOGLE_FORM_ENTRY_NAME`** — the `entry.123456789` next to whatever
      you typed into Customer Name (match it up using the placeholder text
      you typed in step 2)
-   - Same for `GOOGLE_FORM_ENTRY_CITY`, `_PHONE`, `_FULFILLMENT`, `_ITEMS`,
-     `_TOTAL` — one `entry.NNNNNNNNN` value each, matched by the placeholder
-     text you used.
+   - Same for `GOOGLE_FORM_ENTRY_ADDRESS`, `_CITY`, `_PHONE`, `_FULFILLMENT`,
+     `_ITEMS`, `_TOTAL` — one `entry.NNNNNNNNN` value each, matched by the
+     placeholder text you used.
 
 ## 4. Fill in `.env`
 
-Paste all 7 values into the `GOOGLE_FORM_*` variables in `.env`. Leave them
+Paste all 8 values into the `GOOGLE_FORM_*` variables in `.env`. Leave them
 all blank to skip this feature entirely — orders still work fine without it.

@@ -1,6 +1,7 @@
 const { getProduct, PRODUCTS } = require("./products");
 const { getSession, resetSession } = require("./session");
 const { getCustomer, isRegistered, saveCustomer } = require("./customers");
+const { detectCity } = require("./zimCities");
 const { sendText, sendTemplate, sendButtons, sendCatalog } = require("./whatsapp");
 const { appendOrderRow } = require("./ordersSheet");
 
@@ -67,10 +68,10 @@ async function sendMenu(phone) {
 async function sendSettingsMenu(phone, customer) {
   await sendButtons(
     phone,
-    `*Your details:*\n\nName: ${customer.name}\nCity: ${customer.city}\n\nWhat would you like to update? (or type *menu* to go back)`,
+    `*Your details:*\n\nName: ${customer.name}\nAddress: ${customer.address}\n\nWhat would you like to update? (or type *menu* to go back)`,
     [
       { id: "settings_edit_name", title: "Name" },
-      { id: "settings_edit_city", title: "City" },
+      { id: "settings_edit_address", title: "Address" },
     ]
   );
 }
@@ -242,17 +243,25 @@ async function handleIncoming(phone, input) {
         return null;
       }
       session.registerDraft = { name: text };
-      session.state = "REGISTER_CITY";
-      await sendText(phone, "Thanks! Which city are you in?");
+      session.state = "REGISTER_ADDRESS";
+      await sendText(phone, "Thanks! What's your address? Please include your city (e.g. \"12 Baker Street, Harare\").");
       return null;
     }
 
-    case "REGISTER_CITY": {
+    case "REGISTER_ADDRESS": {
       if (!text) {
-        await sendText(phone, "Please enter your city.");
+        await sendText(phone, "Please enter your address.");
         return null;
       }
-      const customer = saveCustomer(phone, { ...session.registerDraft, city: text });
+      const city = detectCity(text);
+      if (!city) {
+        await sendText(
+          phone,
+          "We couldn't spot a recognised city in that — please include it, e.g. \"12 Baker Street, Harare\"."
+        );
+        return null;
+      }
+      const customer = saveCustomer(phone, { ...session.registerDraft, address: text, city });
       session.registerDraft = null;
       await sendText(phone, `You're registered, ${customer.name}!`);
 
@@ -275,9 +284,9 @@ async function handleIncoming(phone, input) {
         await sendText(phone, "What should we update your name (or outlet name) to?");
         return null;
       }
-      if (lower === "settings_edit_city") {
-        session.state = "SETTINGS_EDIT_CITY";
-        await sendText(phone, "What should we update your city to?");
+      if (lower === "settings_edit_address") {
+        session.state = "SETTINGS_EDIT_ADDRESS";
+        await sendText(phone, "What should we update your address to? Please include your city.");
         return null;
       }
       await sendSettingsMenu(phone, getCustomer(phone));
@@ -296,13 +305,21 @@ async function handleIncoming(phone, input) {
       return null;
     }
 
-    case "SETTINGS_EDIT_CITY": {
+    case "SETTINGS_EDIT_ADDRESS": {
       if (!text) {
-        await sendText(phone, "Please enter your city.");
+        await sendText(phone, "Please enter your address.");
         return null;
       }
-      saveCustomer(phone, { city: text });
-      await sendText(phone, "City updated.");
+      const city = detectCity(text);
+      if (!city) {
+        await sendText(
+          phone,
+          "We couldn't spot a recognised city in that — please include it, e.g. \"12 Baker Street, Harare\"."
+        );
+        return null;
+      }
+      saveCustomer(phone, { address: text, city });
+      await sendText(phone, "Address updated.");
       session.state = "SETTINGS_MENU";
       await sendSettingsMenu(phone, getCustomer(phone));
       return null;
@@ -348,7 +365,7 @@ async function handleIncoming(phone, input) {
         const orderSummary =
           `*New Order — ${timestamp}*\n\n` +
           `${customer.name}  (${phone})\n` +
-          `${customer.city}\n` +
+          `${customer.address}\n` +
           `${session.fulfillment}\n\n` +
           formatCart(session.cart);
 
@@ -364,6 +381,7 @@ async function handleIncoming(phone, input) {
         await appendOrderRow({
           timestamp,
           name: customer.name,
+          address: customer.address,
           city: customer.city,
           phone,
           fulfillment: session.fulfillment,
