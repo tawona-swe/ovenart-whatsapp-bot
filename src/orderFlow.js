@@ -71,6 +71,38 @@ async function sendMenu(phone) {
   await sendButtons(phone, "Need to update your details?", [{ id: "settings", title: "Settings" }]);
 }
 
+async function sendOrderTypeChoice(phone) {
+  await sendButtons(phone, "What type of order is this?", [
+    { id: "order_singular", title: "Singular" },
+    { id: "order_merchandise", title: "Merchandise" },
+  ]);
+}
+
+async function sendShopNamePrompt(phone, isFirst) {
+  await sendText(
+    phone,
+    isFirst
+      ? "Merchandise order — which shop/branch is this first for? (e.g. \"Spar Avondale\")"
+      : "Which shop/branch is the next order for?"
+  );
+}
+
+async function sendMerchCatalog(phone, shopName) {
+  await sendCatalog(
+    phone,
+    `Building the order for *${shopName}*. Tap below to add items and quantities, then send when ready.`,
+    String(PRODUCTS[0].id)
+  );
+}
+
+async function sendAddShopPrompt(phone, shops) {
+  const summary = shops.map((s) => `*${s.name}*\n${formatCart(s.cart)}`).join("\n\n");
+  await sendButtons(phone, `${summary}\n\nAdd another shop, or done?`, [
+    { id: "merch_add_shop", title: "Add shop" },
+    { id: "merch_done", title: "Done" },
+  ]);
+}
+
 async function sendSettingsMenu(phone, customer) {
   await sendButtons(
     phone,
@@ -142,12 +174,17 @@ async function notifyBakery({ orderSummary, name, phone, fulfillment, itemsText,
  */
 async function finalizeOrder(order) {
   const timestamp = nowCAT();
+  const body = order.shops
+    ? order.shops
+        .map((s) => `*${s.name}*\n${s.itemsText.split("; ").map((l) => `• ${l}`).join("\n")}\nShop total: $${s.total}`)
+        .join("\n\n")
+    : order.itemsText;
   const orderSummary =
     `*New Order — ${timestamp}*\n\n` +
     `${order.name}  (${order.phone})\n` +
     `${order.address}\n` +
     `${order.fulfillment}\n\n` +
-    `${order.itemsText}\n\nTotal: $${order.total}`;
+    `${body}\n\nTotal: $${order.total}`;
 
   await notifyBakery({
     orderSummary,
@@ -218,15 +255,32 @@ async function sendConfirmPrompt(phone, session, customer) {
   ]);
 }
 
-/** Send whichever entry screen fits: register (new) or the catalog menu (returning). */
+async function sendMerchConfirmPrompt(phone, session, customer) {
+  const shopsSummary = session.merchShops.map((s) => `*${s.name}*\n${formatCart(s.cart)}`).join("\n\n");
+  const overallTotal = session.merchShops
+    .reduce((sum, s) => sum + cartTotal(s.cart), 0)
+    .toFixed(2);
+  const summary =
+    "*Please confirm your order:*\n\n" +
+    `${shopsSummary}\n\n` +
+    `Grand total: $${overallTotal}\n\n` +
+    `Name: ${customer.name}\n` +
+    "Delivery to stores via Oven Art merchandisers";
+  await sendButtons(phone, summary, [
+    { id: "confirm_yes", title: "Confirm" },
+    { id: "confirm_no", title: "Cancel" },
+  ]);
+}
+
+/** Send whichever entry screen fits: register (new) or order-type choice (returning). */
 async function sendEntryScreen(phone, session) {
   if (!isRegistered(phone)) {
     session.state = "REGISTER_START";
     await sendRegisterPrompt(phone);
     return;
   }
-  session.state = "MENU_SENT";
-  await sendMenu(phone);
+  session.state = "ORDER_TYPE_CHOICE";
+  await sendOrderTypeChoice(phone);
 }
 
 /**
@@ -248,6 +302,17 @@ async function handleCatalogOrder(phone, order) {
   }
 
   const session = getSession(phone);
+
+  // Mid-merchandise-order: this cart belongs to the shop just named, not a
+  // standalone singular order.
+  if (session.state === "MERCH_AWAITING_CART" && session.currentShopName) {
+    session.merchShops.push({ name: session.currentShopName, cart });
+    session.currentShopName = null;
+    session.state = "MERCH_ADD_MORE";
+    await sendAddShopPrompt(phone, session.merchShops);
+    return;
+  }
+
   session.cart = cart;
 
   if (!isRegistered(phone)) {
@@ -293,13 +358,120 @@ async function handleIncoming(phone, input) {
     return null;
   }
   if (isRegistered(phone) && lower === "cart") {
-    await sendText(phone, formatCart(session.cart));
+    if (session.merchShops.length > 0) {
+      await sendText(phone, session.merchShops.map((s) => `*${s.name}*\n${formatCart(s.cart)}`).join("\n\n"));
+    } else {
+      await sendText(phone, formatCart(session.cart));
+    }
     return null;
   }
 
   switch (session.state) {
     case "START": {
       await sendEntryScreen(phone, session);
+      return null;
+    }
+
+    // ── Order type + merchandise (multi-shop) ordering ────────────────────────
+    case "ORDER_TYPE_CHOICE": {
+      if (lower === "order_singular") {
+        session.state = "MENU_SENT";
+        await sendMenu(phone);
+        return null;
+      }
+      if (lower === "order_merchandise") {
+        session.merchShops = [];
+        session.state = "MERCH_SHOP_NAME";
+        await sendShopNamePrompt(phone, true);
+        return null;
+      }
+      await sendOrderTypeChoice(phone);
+      return null;
+    }
+
+    case "MENU_SENT": {
+      // Waiting on a catalog submission (handled in handleCatalogOrder) —
+      // a stray text message here just gets a reminder.
+      await sendText(phone, "Please use the menu above to add items, then send your order.");
+      return null;
+    }
+
+    case "MERCH_SHOP_NAME": {
+      if (!text) {
+        await sendText(phone, "Please enter the shop/branch name.");
+        return null;
+      }
+      session.currentShopName = text;
+      session.state = "MERCH_AWAITING_CART";
+      await sendMerchCatalog(phone, text);
+      return null;
+    }
+
+    case "MERCH_AWAITING_CART": {
+      // Waiting on a catalog submission (handled in handleCatalogOrder) —
+      // a stray text message here just gets a reminder.
+      await sendText(phone, `Please use the menu above to add items for *${session.currentShopName}*, then send it.`);
+      return null;
+    }
+
+    case "MERCH_ADD_MORE": {
+      if (lower === "merch_add_shop") {
+        session.state = "MERCH_SHOP_NAME";
+        await sendShopNamePrompt(phone, false);
+        return null;
+      }
+      if (lower === "merch_done") {
+        session.state = "MERCH_CONFIRM";
+        await sendMerchConfirmPrompt(phone, session, getCustomer(phone));
+        return null;
+      }
+      await sendAddShopPrompt(phone, session.merchShops);
+      return null;
+    }
+
+    case "MERCH_CONFIRM": {
+      const customer = getCustomer(phone);
+
+      if (lower === "confirm_yes") {
+        const shops = session.merchShops.map((s) => ({
+          name: s.name,
+          itemsText: cartLines(s.cart).join("; "),
+          total: cartTotal(s.cart).toFixed(2),
+        }));
+        const overallTotal = shops.reduce((sum, s) => sum + Number(s.total), 0).toFixed(2);
+        const autoApproved = customer.city === AUTO_APPROVE_CITY;
+
+        const order = createOrder({
+          phone,
+          name: customer.name,
+          address: customer.address,
+          city: customer.city,
+          fulfillment: "Delivery to stores via Oven Art merchandisers",
+          orderType: "merchandise",
+          shops,
+          itemsText: shops.map((s) => `${s.name}: ${s.itemsText}`).join(" | "),
+          total: overallTotal,
+          autoApproved,
+        });
+
+        resetSession(phone);
+
+        if (autoApproved) {
+          await finalizeOrder(order);
+        } else {
+          await sendText(
+            phone,
+            "Thanks! Your order is being reviewed by our team (we currently fulfil Harare outlets) and we'll confirm shortly."
+          );
+        }
+        return null;
+      }
+      if (lower === "confirm_no") {
+        resetSession(phone);
+        await sendText(phone, "No problem — your order has been cancelled.\n\nType *menu* any time to browse again.");
+        return null;
+      }
+      await sendMerchConfirmPrompt(phone, session, customer);
       return null;
     }
 
@@ -349,8 +521,8 @@ async function handleIncoming(phone, input) {
         return null;
       }
 
-      session.state = "MENU_SENT";
-      await sendMenu(phone);
+      session.state = "ORDER_TYPE_CHOICE";
+      await sendOrderTypeChoice(phone);
       return null;
     }
 

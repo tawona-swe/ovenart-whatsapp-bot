@@ -300,6 +300,14 @@ for (const t of TABS) {
 }
 
 // ─── Verification tab ───────────────────────────────────────────────────────
+/** Plain-text items display — grouped by shop for merchandise orders. */
+function orderItemsText(o) {
+  if (o.shops) {
+    return o.shops.map((s) => `${s.name}:\n${s.itemsText.split("; ").join("\n")}`).join("\n\n");
+  }
+  return o.itemsText.split("; ").join("\n");
+}
+
 async function loadOrders() {
   const res = await api("/api/orders");
   const list = await res.json();
@@ -318,8 +326,8 @@ async function loadOrders() {
           <span class="badge ${o.status}">${o.status}</span>
         </div>
         <div class="meta">${esc(o.phone)} — ${esc(o.address)} (${esc(o.city || "unknown city")})</div>
-        <div class="meta">${esc(o.fulfillment)} — Total $${esc(o.total)} — ${fmtTime(o.createdAt)}</div>
-        <div class="items">${esc(o.itemsText.split("; ").join("\n"))}</div>
+        <div class="meta">${esc(o.fulfillment)}${o.shops ? ` — ${o.shops.length} shops` : ""} — Total $${esc(o.total)} — ${fmtTime(o.createdAt)}</div>
+        <div class="items">${esc(orderItemsText(o))}</div>
       </div>
       ${o.status === "pending" ? `
         <div class="order-actions">
@@ -395,7 +403,7 @@ async function loadSheet() {
             <td>${esc(o.name)}</td>
             <td>${esc(o.phone)}</td>
             <td>${esc(o.fulfillment)}</td>
-            <td>${esc(o.itemsText.split("; ").join(", "))}</td>
+            <td style="white-space: pre-wrap;">${esc(orderItemsText(o))}</td>
             <td>$${esc(o.total)}</td>
           </tr>
         `).join("")}

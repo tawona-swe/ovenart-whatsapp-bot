@@ -11,6 +11,9 @@ function freshSession() {
     registerDraft: null,
     fulfillment: null,
     pendingCartAfterRegister: false,
+    // Merchandise orders (one outlet, several shops in one sitting)
+    currentShopName: null,
+    merchShops: [], // [{ name, cart }]
   };
 }
 
