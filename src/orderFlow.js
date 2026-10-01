@@ -117,7 +117,9 @@ async function sendTimingInputPrompt(phone) {
 }
 
 async function sendNotesPrompt(phone) {
-  await sendText(phone, "Any extra notes for this order? Type them now, or reply \"skip\" if none.");
+  await sendButtons(phone, "Any extra notes for this order? Type them now, or tap below if none.", [
+    { id: "notes_none", title: "No notes" },
+  ]);
 }
 
 /** Move into the shared timing+notes steps; `returnState` is resumed after. */
@@ -550,7 +552,8 @@ async function handleIncoming(phone, input) {
     }
 
     case "NOTES_INPUT": {
-      session.orderNotes = lower === "skip" || !text ? null : text;
+      const skipped = lower === "notes_none" || lower === "skip" || !text;
+      session.orderNotes = skipped ? null : text;
       await resumeToConfirm(phone, session);
       return null;
     }
