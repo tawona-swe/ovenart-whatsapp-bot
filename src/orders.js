@@ -11,7 +11,8 @@ let nextId = 1;
  * @param {{ phone: string, name: string, address: string, city: string,
  *           fulfillment: string, itemsText: string, total: string,
  *           autoApproved: boolean, orderType?: "singular"|"merchandise",
- *           shops?: Array<{ name: string, itemsText: string, total: string }> }} details
+ *           shops?: Array<{ name: string, itemsText: string, total: string }>,
+ *           requestedFor?: string, orderNotes?: string|null }} details
  * @returns {object} the created order record
  */
 function createOrder(details) {

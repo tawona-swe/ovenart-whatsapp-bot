@@ -327,6 +327,7 @@ async function loadOrders() {
         </div>
         <div class="meta">${esc(o.phone)} — ${esc(o.address)} (${esc(o.city || "unknown city")})</div>
         <div class="meta">${esc(o.fulfillment)}${o.shops ? ` — ${o.shops.length} shops` : ""} — Total $${esc(o.total)} — ${fmtTime(o.createdAt)}</div>
+        <div class="meta">When: ${esc(o.requestedFor || "ASAP")}${o.orderNotes ? ` — Notes: ${esc(o.orderNotes)}` : ""}</div>
         <div class="items">${esc(orderItemsText(o))}</div>
       </div>
       ${o.status === "pending" ? `
@@ -394,7 +395,7 @@ async function loadSheet() {
   tableEl.innerHTML = `
     <table>
       <thead>
-        <tr><th>Time</th><th>Name / Outlet</th><th>Phone</th><th>Fulfillment</th><th>Items</th><th>Total</th></tr>
+        <tr><th>Time</th><th>Name / Outlet</th><th>Phone</th><th>Fulfillment</th><th>When / Notes</th><th>Items</th><th>Total</th></tr>
       </thead>
       <tbody>
         ${list.map((o) => `
@@ -403,6 +404,7 @@ async function loadSheet() {
             <td>${esc(o.name)}</td>
             <td>${esc(o.phone)}</td>
             <td>${esc(o.fulfillment)}</td>
+            <td>${esc(o.requestedFor || "ASAP")}${o.orderNotes ? `<br><span style="color:var(--muted)">${esc(o.orderNotes)}</span>` : ""}</td>
             <td style="white-space: pre-wrap;">${esc(orderItemsText(o))}</td>
             <td>$${esc(o.total)}</td>
           </tr>

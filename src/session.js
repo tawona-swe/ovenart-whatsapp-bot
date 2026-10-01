@@ -14,6 +14,10 @@ function freshSession() {
     // Merchandise orders (one outlet, several shops in one sitting)
     currentShopName: null,
     merchShops: [], // [{ name, cart }]
+    // Shared pre-confirm steps (both singular and merchandise orders)
+    timingReturnState: null, // which confirm state to resume after timing/notes
+    requestedFor: null, // "ASAP" or a free-text date/time the customer typed
+    orderNotes: null,
   };
 }
 

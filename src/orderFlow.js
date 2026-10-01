@@ -103,6 +103,30 @@ async function sendAddShopPrompt(phone, shops) {
   ]);
 }
 
+// ─── Shared pre-confirm steps (timing + notes) for both order types ────────
+
+async function sendTimingChoice(phone) {
+  await sendButtons(phone, "When would you like this order?", [
+    { id: "timing_now", title: "Now" },
+    { id: "timing_schedule", title: "Schedule" },
+  ]);
+}
+
+async function sendTimingInputPrompt(phone) {
+  await sendText(phone, "What day and time would you like this? (e.g. \"3 Oct, 10am\")");
+}
+
+async function sendNotesPrompt(phone) {
+  await sendText(phone, "Any extra notes for this order? Type them now, or reply \"skip\" if none.");
+}
+
+/** Move into the shared timing+notes steps; `returnState` is resumed after. */
+async function startTimingAndNotes(phone, session, returnState) {
+  session.timingReturnState = returnState;
+  session.state = "TIMING_CHOICE";
+  await sendTimingChoice(phone);
+}
+
 async function sendSettingsMenu(phone, customer) {
   await sendButtons(
     phone,
@@ -179,11 +203,13 @@ async function finalizeOrder(order) {
         .map((s) => `*${s.name}*\n${s.itemsText.split("; ").map((l) => `• ${l}`).join("\n")}\nShop total: $${s.total}`)
         .join("\n\n")
     : order.itemsText;
+  const whenNotes = `When: ${order.requestedFor || "ASAP"}` + (order.orderNotes ? `\nNotes: ${order.orderNotes}` : "");
   const orderSummary =
     `*New Order — ${timestamp}*\n\n` +
     `${order.name}  (${order.phone})\n` +
     `${order.address}\n` +
-    `${order.fulfillment}\n\n` +
+    `${order.fulfillment}\n` +
+    `${whenNotes}\n\n` +
     `${body}\n\nTotal: $${order.total}`;
 
   await notifyBakery({
@@ -243,12 +269,19 @@ async function rejectOrder(orderId) {
   return order;
 }
 
+function timingAndNotesLines(session) {
+  let lines = `When: ${session.requestedFor || "ASAP"}`;
+  if (session.orderNotes) lines += `\nNotes: ${session.orderNotes}`;
+  return lines;
+}
+
 async function sendConfirmPrompt(phone, session, customer) {
   const summary =
     "*Please confirm your order:*\n\n" +
     `${formatCart(session.cart)}\n\n` +
     `Name: ${customer.name}\n` +
-    `${session.fulfillment}`;
+    `${session.fulfillment}\n` +
+    timingAndNotesLines(session);
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "Confirm" },
     { id: "confirm_no", title: "Cancel" },
@@ -265,11 +298,23 @@ async function sendMerchConfirmPrompt(phone, session, customer) {
     `${shopsSummary}\n\n` +
     `Grand total: $${overallTotal}\n\n` +
     `Name: ${customer.name}\n` +
-    "Delivery to stores via Oven Art merchandisers";
+    "Delivery to stores via Oven Art merchandisers\n" +
+    timingAndNotesLines(session);
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "Confirm" },
     { id: "confirm_no", title: "Cancel" },
   ]);
+}
+
+/** Resume whichever confirm screen the shared timing/notes steps were entered from. */
+async function resumeToConfirm(phone, session) {
+  const customer = getCustomer(phone);
+  session.state = session.timingReturnState;
+  if (session.timingReturnState === "MERCH_CONFIRM") {
+    await sendMerchConfirmPrompt(phone, session, customer);
+  } else {
+    await sendConfirmPrompt(phone, session, customer);
+  }
 }
 
 /** Send whichever entry screen fits: register (new) or order-type choice (returning). */
@@ -421,8 +466,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       if (lower === "merch_done") {
-        session.state = "MERCH_CONFIRM";
-        await sendMerchConfirmPrompt(phone, session, getCustomer(phone));
+        await startTimingAndNotes(phone, session, "MERCH_CONFIRM");
         return null;
       }
       await sendAddShopPrompt(phone, session.merchShops);
@@ -452,6 +496,8 @@ async function handleIncoming(phone, input) {
           itemsText: shops.map((s) => `${s.name}: ${s.itemsText}`).join(" | "),
           total: overallTotal,
           autoApproved,
+          requestedFor: session.requestedFor || "ASAP",
+          orderNotes: session.orderNotes,
         });
 
         resetSession(phone);
@@ -472,6 +518,40 @@ async function handleIncoming(phone, input) {
         return null;
       }
       await sendMerchConfirmPrompt(phone, session, customer);
+      return null;
+    }
+
+    // ── Shared: timing + notes (both order types funnel through here) ─────────
+    case "TIMING_CHOICE": {
+      if (lower === "timing_now") {
+        session.requestedFor = "ASAP";
+        session.state = "NOTES_INPUT";
+        await sendNotesPrompt(phone);
+        return null;
+      }
+      if (lower === "timing_schedule") {
+        session.state = "TIMING_INPUT";
+        await sendTimingInputPrompt(phone);
+        return null;
+      }
+      await sendTimingChoice(phone);
+      return null;
+    }
+
+    case "TIMING_INPUT": {
+      if (!text) {
+        await sendTimingInputPrompt(phone);
+        return null;
+      }
+      session.requestedFor = text;
+      session.state = "NOTES_INPUT";
+      await sendNotesPrompt(phone);
+      return null;
+    }
+
+    case "NOTES_INPUT": {
+      session.orderNotes = lower === "skip" || !text ? null : text;
+      await resumeToConfirm(phone, session);
       return null;
     }
 
@@ -578,8 +658,7 @@ async function handleIncoming(phone, input) {
     case "CHECKOUT_FULFILLMENT": {
       if (lower === "fulfillment_pickup") {
         session.fulfillment = "Pickup";
-        session.state = "CHECKOUT_CONFIRM";
-        await sendConfirmPrompt(phone, session, getCustomer(phone));
+        await startTimingAndNotes(phone, session, "CHECKOUT_CONFIRM");
         return null;
       }
       if (lower === "fulfillment_delivery") {
@@ -601,8 +680,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       session.fulfillment = `Delivery — ${text}`;
-      session.state = "CHECKOUT_CONFIRM";
-      await sendConfirmPrompt(phone, session, getCustomer(phone));
+      await startTimingAndNotes(phone, session, "CHECKOUT_CONFIRM");
       return null;
     }
 
@@ -620,6 +698,8 @@ async function handleIncoming(phone, input) {
           itemsText: cartLines(session.cart).join("; "),
           total: cartTotal(session.cart).toFixed(2),
           autoApproved,
+          requestedFor: session.requestedFor || "ASAP",
+          orderNotes: session.orderNotes,
         });
 
         resetSession(phone);
