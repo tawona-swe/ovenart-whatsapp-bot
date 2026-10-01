@@ -4,7 +4,7 @@ const express = require("express");
 const { handleIncoming, handleCatalogOrder } = require("./orderFlow");
 const { sendText } = require("./whatsapp");
 const { recordInbound, isWindowOpen, getThread, listConversations } = require("./conversations");
-const { getCustomer } = require("./customers");
+const { getCustomer, listCustomers } = require("./customers");
 
 // ─── Startup env check ───────────────────────────────────────────────────────
 const requiredEnv = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN"];
@@ -132,6 +132,10 @@ app.get("/dashboard", requireDashboardAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
 });
 app.use("/api", requireDashboardAuth);
+
+app.get("/api/customers", (_req, res) => {
+  res.json(listCustomers());
+});
 
 app.get("/api/conversations", (_req, res) => {
   const list = listConversations().map((c) => ({

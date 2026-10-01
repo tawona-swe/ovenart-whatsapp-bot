@@ -26,4 +26,11 @@ function saveCustomer(phone, { name, address, city }) {
   return updated;
 }
 
-module.exports = { getCustomer, isRegistered, saveCustomer };
+/** All registered customers/outlets, most recently registered first. */
+function listCustomers() {
+  return [...customers.entries()]
+    .map(([phone, profile]) => ({ phone, ...profile }))
+    .sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
+}
+
+module.exports = { getCustomer, isRegistered, saveCustomer, listCustomers };
