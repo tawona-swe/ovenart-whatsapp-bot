@@ -3,7 +3,7 @@ const path = require("path");
 const express = require("express");
 const { handleIncoming, handleCatalogOrder, approveOrder, rejectOrder } = require("./orderFlow");
 const { sendText } = require("./whatsapp");
-const { recordInbound, isWindowOpen, getThread, listConversations } = require("./conversations");
+const { recordInbound, isWindowOpen, getWindowExpiresAt, getThread, listConversations } = require("./conversations");
 const { getCustomer, listCustomers } = require("./customers");
 const { listOrders } = require("./orders");
 
@@ -177,6 +177,7 @@ app.get("/api/conversations/:phone/messages", (req, res) => {
   res.json({
     messages: getThread(req.params.phone),
     windowOpen: isWindowOpen(req.params.phone),
+    windowExpiresAt: getWindowExpiresAt(req.params.phone),
     name: getCustomer(req.params.phone)?.name ?? null,
   });
 });

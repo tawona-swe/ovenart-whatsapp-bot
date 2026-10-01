@@ -32,6 +32,13 @@ function isWindowOpen(phone) {
   return Date.now() - convo.lastInboundAt < WINDOW_MS;
 }
 
+/** When the 24h window closes (ms epoch), or null if it's never been opened. */
+function getWindowExpiresAt(phone) {
+  const convo = conversations.get(phone);
+  if (!convo || !convo.lastInboundAt) return null;
+  return convo.lastInboundAt + WINDOW_MS;
+}
+
 function getThread(phone) {
   return conversations.get(phone)?.messages ?? [];
 }
@@ -43,8 +50,16 @@ function listConversations() {
       phone,
       lastMessage: convo.messages[convo.messages.length - 1] ?? null,
       windowOpen: isWindowOpen(phone),
+      windowExpiresAt: getWindowExpiresAt(phone),
     }))
     .sort((a, b) => (b.lastMessage?.at ?? 0) - (a.lastMessage?.at ?? 0));
 }
 
-module.exports = { recordInbound, recordOutbound, isWindowOpen, getThread, listConversations };
+module.exports = {
+  recordInbound,
+  recordOutbound,
+  isWindowOpen,
+  getWindowExpiresAt,
+  getThread,
+  listConversations,
+};

@@ -85,6 +85,7 @@
   .convo.active { background: var(--bubble-out); }
   .convo .name { font-weight: 600; font-size: 14px; }
   .convo .phone { font-size: 12px; color: var(--muted); }
+  .convo .countdown { font-size: 11px; color: var(--muted); }
   .convo .preview { font-size: 12.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
   .dot.open { background: var(--open); }
@@ -197,6 +198,16 @@ function fmtDate(iso) {
   return iso ? new Date(iso).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "—";
 }
 
+/** "18h 42m left" / "42m left" / "Closed" / "" (never messaged) from an expiry timestamp. */
+function fmtCountdown(expiresAt) {
+  if (!expiresAt) return "";
+  const msLeft = expiresAt - Date.now();
+  if (msLeft <= 0) return "Closed";
+  const h = Math.floor(msLeft / 3600000);
+  const m = Math.floor((msLeft % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+}
+
 // ─── Tabs ─────────────────────────────────────────────────────────────────
 const TABS = ["inbox", "verification", "customers"];
 function switchTab(tab) {
@@ -297,9 +308,9 @@ async function loadConversations() {
   const list = await res.json();
   const el = document.getElementById("list");
   el.innerHTML = "<h1>Conversations</h1>" + list.map((c) => `
-    <div class="convo ${c.phone === activePhone ? "active" : ""}" data-phone="${c.phone}">
+    <div class="convo ${c.phone === activePhone ? "active" : ""}" data-phone="${c.phone}" data-expires="${c.windowExpiresAt || ""}">
       <div class="name"><span class="dot ${c.windowOpen ? "open" : "closed"}"></span>${esc(c.name || c.phone)}</div>
-      <div class="phone">${c.phone}</div>
+      <div class="phone">${c.phone} <span class="countdown">${fmtCountdown(c.windowExpiresAt)}</span></div>
       <div class="preview">${esc(c.lastMessage ? c.lastMessage.text : "")}</div>
     </div>
   `).join("");
@@ -319,6 +330,7 @@ async function openConversation(phone) {
     <div id="thread-header">
       <div><strong id="thread-name"></strong> — <span id="thread-phone"></span></div>
       <div id="thread-status" class="status"></div>
+      <div id="thread-countdown" class="status"></div>
     </div>
     <div id="thread"></div>
     <div id="reply-warning">This conversation's 24h window is closed — a message sent now would need an approved template.</div>
@@ -337,6 +349,8 @@ async function openConversation(phone) {
   pollTimer = setInterval(loadThread, 4000);
 }
 
+let activeThreadExpiresAt = null;
+
 async function loadThread() {
   if (!activePhone) return;
   const res = await api(`/api/conversations/${encodeURIComponent(activePhone)}/messages`);
@@ -347,6 +361,9 @@ async function loadThread() {
   const statusEl = document.getElementById("thread-status");
   statusEl.className = `status ${data.windowOpen ? "open" : "closed"}`;
   statusEl.textContent = data.windowOpen ? "Window open — free replies" : "Window closed — needs a template to message first";
+
+  activeThreadExpiresAt = data.windowExpiresAt;
+  renderThreadCountdown();
 
   const threadEl = document.getElementById("thread");
   const wasAtBottom = threadEl.scrollTop + threadEl.clientHeight >= threadEl.scrollHeight - 20;
@@ -359,6 +376,22 @@ async function loadThread() {
   // Only touch enabled state, never .value — never disturb text mid-typing.
   document.getElementById("reply-text").disabled = !data.windowOpen;
   document.getElementById("reply-send").disabled = !data.windowOpen;
+}
+
+function renderThreadCountdown() {
+  const el = document.getElementById("thread-countdown");
+  if (!el) return;
+  el.textContent = activeThreadExpiresAt ? fmtCountdown(activeThreadExpiresAt) : "";
+}
+
+/** Re-render countdown text from already-fetched data — no network call. */
+function tickCountdowns() {
+  renderThreadCountdown();
+  document.querySelectorAll(".convo").forEach((row) => {
+    const expires = Number(row.dataset.expires) || null;
+    const el = row.querySelector(".countdown");
+    if (el) el.textContent = fmtCountdown(expires);
+  });
 }
 
 async function sendReply() {
@@ -386,6 +419,7 @@ loadConversations();
 setInterval(() => { if (activeTab === "inbox") loadConversations(); }, 5000);
 setInterval(() => { if (activeTab === "customers") loadCustomers(); }, 5000);
 setInterval(() => { if (activeTab === "verification") loadOrders(); }, 5000);
+setInterval(tickCountdowns, 30000);
 </script>
 </body>
 </html>
