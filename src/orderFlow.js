@@ -4,6 +4,12 @@ const { getCustomer, isRegistered, saveCustomer } = require("./customers");
 const { detectCity } = require("./zimCities");
 const { sendText, sendTemplate, sendButtons, sendCatalog } = require("./whatsapp");
 const { appendOrderRow } = require("./ordersSheet");
+const { createOrder, getOrder, setStatus } = require("./orders");
+
+// Orders are only auto-approved when the outlet is based in Harare — the
+// factory's only location. Anything else needs manual review (Verification
+// tab on the dashboard) before staff get notified / it hits the sheet.
+const AUTO_APPROVE_CITY = "Harare";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +133,77 @@ async function notifyBakery({ orderSummary, name, phone, fulfillment, itemsText,
         : ""
     );
   }
+}
+
+/**
+ * Run the actual confirmation side-effects for an order record — staff
+ * notification, sheet row, customer confirmation text — shared by both the
+ * auto-approve path (Harare) and manual dashboard approval (everyone else).
+ */
+async function finalizeOrder(order) {
+  const timestamp = nowCAT();
+  const orderSummary =
+    `*New Order — ${timestamp}*\n\n` +
+    `${order.name}  (${order.phone})\n` +
+    `${order.address}\n` +
+    `${order.fulfillment}\n\n` +
+    `${order.itemsText}\n\nTotal: $${order.total}`;
+
+  await notifyBakery({
+    orderSummary,
+    name: order.name,
+    phone: order.phone,
+    fulfillment: order.fulfillment,
+    itemsText: order.itemsText,
+    total: order.total,
+  });
+
+  await appendOrderRow({
+    timestamp,
+    name: order.name,
+    address: order.address,
+    city: order.city,
+    phone: order.phone,
+    fulfillment: order.fulfillment,
+    itemsText: order.itemsText,
+    total: order.total,
+  });
+
+  try {
+    await sendText(
+      order.phone,
+      "*Order confirmed!* Thank you.\n\nThe Oven Art team has received your order and will be in touch shortly.\n\nType *menu* any time to start a new order."
+    );
+  } catch (err) {
+    // Only matters if this is a delayed manual approval and the customer's
+    // 24h window has since closed — the order itself is still fully valid.
+    console.error("[order] couldn't send confirmation to customer (order is still confirmed):", err.message);
+  }
+}
+
+/** Approve a pending order from the dashboard's Verification tab. */
+async function approveOrder(orderId) {
+  const order = getOrder(orderId);
+  if (!order) throw new Error("Order not found");
+  setStatus(orderId, "confirmed");
+  await finalizeOrder(order);
+  return order;
+}
+
+/** Reject a pending order from the dashboard's Verification tab. */
+async function rejectOrder(orderId) {
+  const order = getOrder(orderId);
+  if (!order) throw new Error("Order not found");
+  setStatus(orderId, "rejected");
+  try {
+    await sendText(
+      order.phone,
+      "Sorry — we're currently only able to fulfil orders for outlets based in Harare, so we're unable to process this one. Thank you for your interest."
+    );
+  } catch (err) {
+    console.error("[order] couldn't send rejection notice to customer:", err.message);
+  }
+  return order;
 }
 
 async function sendConfirmPrompt(phone, session, customer) {
@@ -361,39 +438,28 @@ async function handleIncoming(phone, input) {
       const customer = getCustomer(phone);
 
       if (lower === "confirm_yes") {
-        const timestamp = nowCAT();
-        const orderSummary =
-          `*New Order — ${timestamp}*\n\n` +
-          `${customer.name}  (${phone})\n` +
-          `${customer.address}\n` +
-          `${session.fulfillment}\n\n` +
-          formatCart(session.cart);
-
-        await notifyBakery({
-          orderSummary,
-          name: customer.name,
+        const autoApproved = customer.city === AUTO_APPROVE_CITY;
+        const order = createOrder({
           phone,
-          fulfillment: session.fulfillment,
-          itemsText: cartLines(session.cart).join(", "),
-          total: cartTotal(session.cart).toFixed(2),
-        });
-
-        await appendOrderRow({
-          timestamp,
           name: customer.name,
           address: customer.address,
           city: customer.city,
-          phone,
           fulfillment: session.fulfillment,
           itemsText: cartLines(session.cart).join("; "),
           total: cartTotal(session.cart).toFixed(2),
+          autoApproved,
         });
 
         resetSession(phone);
-        await sendText(
-          phone,
-          "*Order confirmed!* Thank you.\n\nThe Oven Art team has received your order and will be in touch shortly.\n\nType *menu* any time to start a new order."
-        );
+
+        if (autoApproved) {
+          await finalizeOrder(order);
+        } else {
+          await sendText(
+            phone,
+            "Thanks! Your order is being reviewed by our team (we currently fulfil Harare outlets) and we'll confirm shortly."
+          );
+        }
         return null;
       }
       if (lower === "confirm_no") {
@@ -413,4 +479,4 @@ async function handleIncoming(phone, input) {
   }
 }
 
-module.exports = { handleIncoming, handleCatalogOrder };
+module.exports = { handleIncoming, handleCatalogOrder, approveOrder, rejectOrder };

@@ -1,10 +1,11 @@
 require("dotenv").config();
 const path = require("path");
 const express = require("express");
-const { handleIncoming, handleCatalogOrder } = require("./orderFlow");
+const { handleIncoming, handleCatalogOrder, approveOrder, rejectOrder } = require("./orderFlow");
 const { sendText } = require("./whatsapp");
 const { recordInbound, isWindowOpen, getThread, listConversations } = require("./conversations");
 const { getCustomer, listCustomers } = require("./customers");
+const { listOrders } = require("./orders");
 
 // ─── Startup env check ───────────────────────────────────────────────────────
 const requiredEnv = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN"];
@@ -135,6 +136,30 @@ app.use("/api", requireDashboardAuth);
 
 app.get("/api/customers", (_req, res) => {
   res.json(listCustomers());
+});
+
+app.get("/api/orders", (_req, res) => {
+  res.json(listOrders());
+});
+
+app.post("/api/orders/:id/approve", async (req, res) => {
+  try {
+    const order = await approveOrder(req.params.id);
+    res.json(order);
+  } catch (err) {
+    console.error("[dashboard] approve failed:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/orders/:id/reject", async (req, res) => {
+  try {
+    const order = await rejectOrder(req.params.id);
+    res.json(order);
+  } catch (err) {
+    console.error("[dashboard] reject failed:", err.message);
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.get("/api/conversations", (_req, res) => {

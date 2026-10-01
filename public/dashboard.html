@@ -116,12 +116,32 @@
   }
   tbody td { padding: 10px 20px; border-bottom: 1px solid var(--border); vertical-align: top; }
   tbody tr:hover { background: var(--bg); }
-  #customers-empty { padding: 20px; color: var(--muted); font-size: 14px; }
+  #customers-empty, #orders-empty { padding: 20px; color: var(--muted); font-size: 14px; }
+
+  /* ─── Verification view ───────────────────────────────────────────────── */
+  #orders-view { flex-direction: column; overflow-y: auto; background: var(--panel); }
+  #orders-view h1 { font-size: 15px; padding: 16px 20px; margin: 0; border-bottom: 1px solid var(--border); }
+  #orders-list { display: flex; flex-direction: column; }
+  .order-card { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: flex-start; }
+  .order-card .main { flex: 1; min-width: 0; }
+  .order-card .top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .order-card .name { font-weight: 600; font-size: 14px; }
+  .order-card .meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .order-card .items { font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
+  .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; }
+  .badge.pending { background: #fdf1d6; color: var(--accent); }
+  .badge.confirmed { background: #e3f3e9; color: var(--open); }
+  .badge.rejected { background: #fbe1e1; color: var(--closed); }
+  .order-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .order-actions button { border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-approve { background: var(--open); color: #fff; }
+  .btn-reject { background: var(--closed); color: #fff; }
 </style>
 </head>
 <body>
   <div id="tabs">
     <button id="tab-inbox" class="active">Inbox</button>
+    <button id="tab-verification">Verification</button>
     <button id="tab-customers">Customers</button>
   </div>
 
@@ -131,6 +151,11 @@
       <div id="thread-wrap">
         <div id="empty">Select a conversation</div>
       </div>
+    </div>
+
+    <div id="orders-view" class="view">
+      <h1>Order verification — outlets outside Harare need manual review</h1>
+      <div id="orders-list"></div>
     </div>
 
     <div id="customers-view" class="view">
@@ -163,16 +188,67 @@ function fmtDate(iso) {
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────
+const TABS = ["inbox", "verification", "customers"];
 function switchTab(tab) {
   activeTab = tab;
-  document.getElementById("tab-inbox").classList.toggle("active", tab === "inbox");
-  document.getElementById("tab-customers").classList.toggle("active", tab === "customers");
+  for (const t of TABS) {
+    document.getElementById(`tab-${t}`).classList.toggle("active", t === tab);
+  }
   document.getElementById("inbox-view").classList.toggle("active", tab === "inbox");
+  document.getElementById("orders-view").classList.toggle("active", tab === "verification");
   document.getElementById("customers-view").classList.toggle("active", tab === "customers");
   if (tab === "customers") loadCustomers();
+  if (tab === "verification") loadOrders();
 }
-document.getElementById("tab-inbox").addEventListener("click", () => switchTab("inbox"));
-document.getElementById("tab-customers").addEventListener("click", () => switchTab("customers"));
+for (const t of TABS) {
+  document.getElementById(`tab-${t}`).addEventListener("click", () => switchTab(t));
+}
+
+// ─── Verification tab ───────────────────────────────────────────────────────
+async function loadOrders() {
+  const res = await api("/api/orders");
+  const list = await res.json();
+  const el = document.getElementById("orders-list");
+
+  if (list.length === 0) {
+    el.innerHTML = `<div id="orders-empty">No orders yet.</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map((o) => `
+    <div class="order-card" data-id="${o.id}">
+      <div class="main">
+        <div class="top">
+          <span class="name">${esc(o.name)}</span>
+          <span class="badge ${o.status}">${o.status}</span>
+        </div>
+        <div class="meta">${esc(o.phone)} — ${esc(o.address)} (${esc(o.city || "unknown city")})</div>
+        <div class="meta">${esc(o.fulfillment)} — Total $${esc(o.total)} — ${fmtTime(o.createdAt)}</div>
+        <div class="items">${esc(o.itemsText.split("; ").join("\n"))}</div>
+      </div>
+      ${o.status === "pending" ? `
+        <div class="order-actions">
+          <button class="btn-approve" data-action="approve" data-id="${o.id}">Approve</button>
+          <button class="btn-reject" data-action="reject" data-id="${o.id}">Reject</button>
+        </div>
+      ` : ""}
+    </div>
+  `).join("");
+
+  el.querySelectorAll("button[data-action]").forEach((btn) => {
+    btn.addEventListener("click", () => reviewOrder(btn.dataset.id, btn.dataset.action));
+  });
+}
+
+async function reviewOrder(id, action) {
+  const res = await api(`/api/orders/${id}/${action}`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || `Failed to ${action}.`);
+    return;
+  }
+  await loadOrders();
+}
 
 // ─── Customers tab ──────────────────────────────────────────────────────────
 async function loadCustomers() {
@@ -299,6 +375,7 @@ async function sendReply() {
 loadConversations();
 setInterval(() => { if (activeTab === "inbox") loadConversations(); }, 5000);
 setInterval(() => { if (activeTab === "customers") loadCustomers(); }, 5000);
+setInterval(() => { if (activeTab === "verification") loadOrders(); }, 5000);
 </script>
 </body>
 </html>
