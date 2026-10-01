@@ -137,6 +137,19 @@ async function startCheckoutExtras(phone, session, returnState) {
   await sendCurrencyChoice(phone);
 }
 
+/**
+ * Fast path: assume USD / now / no notes and go straight to the confirm
+ * screen, instead of asking three extra questions on every single order.
+ * The confirm screen's "Edit details" button still reaches the full
+ * currency/timing/notes flow via startCheckoutExtras for anyone who needs it.
+ */
+async function applyDefaultsAndConfirm(phone, session, returnState) {
+  session.currency = session.currency || "USD";
+  session.requestedFor = session.requestedFor || "ASAP";
+  session.timingReturnState = returnState;
+  await resumeToConfirm(phone, session);
+}
+
 async function sendSettingsMenu(phone, customer) {
   await sendButtons(
     phone,
@@ -198,6 +211,24 @@ async function notifyBakery({ orderSummary, name, phone, fulfillment, itemsText,
         ? "Tip: without BAKERY_ORDER_TEMPLATE_NAME set, staff must message the bot at least once every 24h to keep notifications working."
         : ""
     );
+  }
+}
+
+/**
+ * Best-effort heads-up when an order needs manual review (outside Harare) —
+ * the dashboard's Verification tab is the real safety net; this is just a
+ * bonus nudge for whoever has staff notifications configured. Silent no-op
+ * if BAKERY_NOTIFY_NUMBER isn't set, same as notifyBakery.
+ */
+async function notifyBakeryPending(order) {
+  if (!process.env.BAKERY_NOTIFY_NUMBER) return;
+  try {
+    await sendText(
+      process.env.BAKERY_NOTIFY_NUMBER,
+      `New order needs review (outside Harare): ${order.name} — ${order.city}. Check the Verification tab.`
+    );
+  } catch (err) {
+    console.error("[order] pending-review alert failed:", err.message);
   }
 }
 
@@ -296,6 +327,7 @@ async function sendConfirmPrompt(phone, session, customer) {
     timingAndNotesLines(session);
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "Confirm" },
+    { id: "edit_details", title: "Edit details" },
     { id: "confirm_no", title: "Cancel" },
   ]);
 }
@@ -314,6 +346,7 @@ async function sendMerchConfirmPrompt(phone, session, customer) {
     timingAndNotesLines(session);
   await sendButtons(phone, summary, [
     { id: "confirm_yes", title: "Confirm" },
+    { id: "edit_details", title: "Edit details" },
     { id: "confirm_no", title: "Cancel" },
   ]);
 }
@@ -478,7 +511,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       if (lower === "merch_done") {
-        await startCheckoutExtras(phone, session, "MERCH_CONFIRM");
+        await applyDefaultsAndConfirm(phone, session, "MERCH_CONFIRM");
         return null;
       }
       await sendAddShopPrompt(phone, session.merchShops);
@@ -519,6 +552,7 @@ async function handleIncoming(phone, input) {
         if (autoApproved) {
           await finalizeOrder(order);
         } else {
+          await notifyBakeryPending(order);
           await sendText(
             phone,
             "Thanks! Your order is being reviewed by our team (we currently fulfil Harare outlets) and we'll confirm shortly."
@@ -529,6 +563,10 @@ async function handleIncoming(phone, input) {
       if (lower === "confirm_no") {
         resetSession(phone);
         await sendText(phone, "No problem — your order has been cancelled.\n\nType *menu* any time to browse again.");
+        return null;
+      }
+      if (lower === "edit_details") {
+        await startCheckoutExtras(phone, session, "MERCH_CONFIRM");
         return null;
       }
       await sendMerchConfirmPrompt(phone, session, customer);
@@ -685,7 +723,7 @@ async function handleIncoming(phone, input) {
     case "CHECKOUT_FULFILLMENT": {
       if (lower === "fulfillment_pickup") {
         session.fulfillment = "Pickup";
-        await startCheckoutExtras(phone, session, "CHECKOUT_CONFIRM");
+        await applyDefaultsAndConfirm(phone, session, "CHECKOUT_CONFIRM");
         return null;
       }
       if (lower === "fulfillment_delivery") {
@@ -707,7 +745,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       session.fulfillment = `Delivery — ${text}`;
-      await startCheckoutExtras(phone, session, "CHECKOUT_CONFIRM");
+      await applyDefaultsAndConfirm(phone, session, "CHECKOUT_CONFIRM");
       return null;
     }
 
@@ -736,6 +774,7 @@ async function handleIncoming(phone, input) {
         if (autoApproved) {
           await finalizeOrder(order);
         } else {
+          await notifyBakeryPending(order);
           await sendText(
             phone,
             "Thanks! Your order is being reviewed by our team (we currently fulfil Harare outlets) and we'll confirm shortly."
@@ -746,6 +785,10 @@ async function handleIncoming(phone, input) {
       if (lower === "confirm_no") {
         resetSession(phone);
         await sendText(phone, "No problem — your order has been cancelled.\n\nType *menu* any time to browse again.");
+        return null;
+      }
+      if (lower === "edit_details") {
+        await startCheckoutExtras(phone, session, "CHECKOUT_CONFIRM");
         return null;
       }
       await sendConfirmPrompt(phone, session, customer);
