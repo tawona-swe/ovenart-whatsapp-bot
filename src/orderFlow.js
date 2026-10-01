@@ -103,7 +103,15 @@ async function sendAddShopPrompt(phone, shops) {
   ]);
 }
 
-// ─── Shared pre-confirm steps (timing + notes) for both order types ────────
+// ─── Shared pre-confirm steps (currency + timing + notes) for both order types ────────
+
+async function sendCurrencyChoice(phone) {
+  await sendButtons(phone, "Which currency is this order in?", [
+    { id: "currency_usd", title: "USD" },
+    { id: "currency_zwl", title: "ZWL" },
+    { id: "currency_zig", title: "ZIG" },
+  ]);
+}
 
 async function sendTimingChoice(phone) {
   await sendButtons(phone, "When would you like this order?", [
@@ -122,11 +130,11 @@ async function sendNotesPrompt(phone) {
   ]);
 }
 
-/** Move into the shared timing+notes steps; `returnState` is resumed after. */
-async function startTimingAndNotes(phone, session, returnState) {
+/** Move into the shared currency+timing+notes steps; `returnState` is resumed after. */
+async function startCheckoutExtras(phone, session, returnState) {
   session.timingReturnState = returnState;
-  session.state = "TIMING_CHOICE";
-  await sendTimingChoice(phone);
+  session.state = "CURRENCY_CHOICE";
+  await sendCurrencyChoice(phone);
 }
 
 async function sendSettingsMenu(phone, customer) {
@@ -205,7 +213,9 @@ async function finalizeOrder(order) {
         .map((s) => `*${s.name}*\n${s.itemsText.split("; ").map((l) => `• ${l}`).join("\n")}\nShop total: $${s.total}`)
         .join("\n\n")
     : order.itemsText;
-  const whenNotes = `When: ${order.requestedFor || "ASAP"}` + (order.orderNotes ? `\nNotes: ${order.orderNotes}` : "");
+  const whenNotes =
+    `Currency: ${order.currency || "USD"}\nWhen: ${order.requestedFor || "ASAP"}` +
+    (order.orderNotes ? `\nNotes: ${order.orderNotes}` : "");
   const orderSummary =
     `*New Order — ${timestamp}*\n\n` +
     `${order.name}  (${order.phone})\n` +
@@ -272,7 +282,7 @@ async function rejectOrder(orderId) {
 }
 
 function timingAndNotesLines(session) {
-  let lines = `When: ${session.requestedFor || "ASAP"}`;
+  let lines = `Currency: ${session.currency || "USD"}\nWhen: ${session.requestedFor || "ASAP"}`;
   if (session.orderNotes) lines += `\nNotes: ${session.orderNotes}`;
   return lines;
 }
@@ -468,7 +478,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       if (lower === "merch_done") {
-        await startTimingAndNotes(phone, session, "MERCH_CONFIRM");
+        await startCheckoutExtras(phone, session, "MERCH_CONFIRM");
         return null;
       }
       await sendAddShopPrompt(phone, session.merchShops);
@@ -481,6 +491,7 @@ async function handleIncoming(phone, input) {
       if (lower === "confirm_yes") {
         const shops = session.merchShops.map((s) => ({
           name: s.name,
+          items: s.cart,
           itemsText: cartLines(s.cart).join("; "),
           total: cartTotal(s.cart).toFixed(2),
         }));
@@ -498,6 +509,7 @@ async function handleIncoming(phone, input) {
           itemsText: shops.map((s) => `${s.name}: ${s.itemsText}`).join(" | "),
           total: overallTotal,
           autoApproved,
+          currency: session.currency || "USD",
           requestedFor: session.requestedFor || "ASAP",
           orderNotes: session.orderNotes,
         });
@@ -523,7 +535,19 @@ async function handleIncoming(phone, input) {
       return null;
     }
 
-    // ── Shared: timing + notes (both order types funnel through here) ─────────
+    // ── Shared: currency + timing + notes (both order types funnel through here) ──
+    case "CURRENCY_CHOICE": {
+      const currencies = { currency_usd: "USD", currency_zwl: "ZWL", currency_zig: "ZIG" };
+      if (currencies[lower]) {
+        session.currency = currencies[lower];
+        session.state = "TIMING_CHOICE";
+        await sendTimingChoice(phone);
+        return null;
+      }
+      await sendCurrencyChoice(phone);
+      return null;
+    }
+
     case "TIMING_CHOICE": {
       if (lower === "timing_now") {
         session.requestedFor = "ASAP";
@@ -661,7 +685,7 @@ async function handleIncoming(phone, input) {
     case "CHECKOUT_FULFILLMENT": {
       if (lower === "fulfillment_pickup") {
         session.fulfillment = "Pickup";
-        await startTimingAndNotes(phone, session, "CHECKOUT_CONFIRM");
+        await startCheckoutExtras(phone, session, "CHECKOUT_CONFIRM");
         return null;
       }
       if (lower === "fulfillment_delivery") {
@@ -683,7 +707,7 @@ async function handleIncoming(phone, input) {
         return null;
       }
       session.fulfillment = `Delivery — ${text}`;
-      await startTimingAndNotes(phone, session, "CHECKOUT_CONFIRM");
+      await startCheckoutExtras(phone, session, "CHECKOUT_CONFIRM");
       return null;
     }
 
@@ -698,9 +722,11 @@ async function handleIncoming(phone, input) {
           address: customer.address,
           city: customer.city,
           fulfillment: session.fulfillment,
+          items: session.cart,
           itemsText: cartLines(session.cart).join("; "),
           total: cartTotal(session.cart).toFixed(2),
           autoApproved,
+          currency: session.currency || "USD",
           requestedFor: session.requestedFor || "ASAP",
           orderNotes: session.orderNotes,
         });

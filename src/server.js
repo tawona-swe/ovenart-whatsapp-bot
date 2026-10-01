@@ -6,6 +6,7 @@ const { sendText } = require("./whatsapp");
 const { recordInbound, isWindowOpen, getWindowExpiresAt, getThread, listConversations } = require("./conversations");
 const { getCustomer, listCustomers } = require("./customers");
 const { listOrders } = require("./orders");
+const { getCategories, getProductsByCategorySlug } = require("./products");
 
 // ─── Startup env check ───────────────────────────────────────────────────────
 const requiredEnv = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN"];
@@ -139,6 +140,16 @@ app.use("/api", requireDashboardAuth);
 
 app.get("/api/customers", (_req, res) => {
   res.json(listCustomers());
+});
+
+app.get("/api/products", (_req, res) => {
+  res.json(
+    getCategories().map((c) => ({
+      slug: c.slug,
+      label: c.label,
+      products: getProductsByCategorySlug(c.slug).map((p) => ({ id: p.id, name: p.name })),
+    }))
+  );
 });
 
 app.get("/api/orders", (_req, res) => {

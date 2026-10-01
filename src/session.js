@@ -15,7 +15,8 @@ function freshSession() {
     currentShopName: null,
     merchShops: [], // [{ name, cart }]
     // Shared pre-confirm steps (both singular and merchandise orders)
-    timingReturnState: null, // which confirm state to resume after timing/notes
+    timingReturnState: null, // which confirm state to resume after currency/timing/notes
+    currency: null, // "USD" | "ZWL" | "ZIG"
     requestedFor: null, // "ASAP" or a free-text date/time the customer typed
     orderNotes: null,
   };

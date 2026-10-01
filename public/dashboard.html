@@ -162,13 +162,34 @@
   .badge.closed-window { background: var(--border); color: var(--muted); }
 
   #print-header { display: none; }
+  #print-header h2 { margin: 0; font-size: 16px; text-transform: uppercase; }
+  #print-header .sub { margin: 1px 0; font-size: 12.5px; font-weight: 600; text-transform: uppercase; }
+  #print-header .date { margin: 4px 0 0; font-size: 12.5px; }
+
+  .category-block { margin: 0 20px 22px; border: 1px solid var(--border); }
+  .category-block h3 {
+    margin: 0; padding: 7px 12px; font-size: 12.5px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; background: var(--navy); color: #fff;
+  }
+  .pivot-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .pivot-table th, .pivot-table td {
+    border: 1px solid var(--border); padding: 5px 8px; text-align: center; white-space: nowrap;
+  }
+  .pivot-table thead th { background: var(--bg); font-size: 10.5px; text-transform: uppercase; color: var(--muted); }
+  .pivot-table td.outlet-name { text-align: left; font-weight: 600; white-space: normal; }
+  .pivot-table tr.subtotal-row td { background: var(--accent-soft); font-weight: 700; }
+  .pivot-table td.qty-blank { color: var(--border); }
+  #sheet-notes { margin: 0 20px 20px; font-size: 12.5px; }
+  #sheet-notes h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
+  #sheet-notes div { padding: 3px 0; }
+
   @media print {
+    @page { size: landscape; margin: 12mm; }
     #tabs, #sheet-toolbar { display: none !important; }
     body, #views, #sheet-view { display: block !important; overflow: visible !important; height: auto !important; }
-    #print-header { display: block; padding: 0 0 12px; }
-    #print-header h2 { margin: 0 0 2px; font-size: 18px; }
-    #print-header div { font-size: 12px; color: #555; }
-    table { font-size: 12px; }
+    #print-header { display: block; padding: 0 0 14px; }
+    .category-block { margin: 0 0 16px; break-inside: avoid; }
+    .pivot-table { font-size: 10.5px; }
   }
 </style>
 </head>
@@ -202,10 +223,12 @@
       </div>
       <div id="sheet-summary"></div>
       <div id="print-header">
-        <h2>Oven Art Bakery — Dispatch Sheet</h2>
-        <div id="print-header-sub"></div>
+        <h2>Oven Art (Pvt) Ltd</h2>
+        <div class="sub">Sales Orders Despatch Sheet</div>
+        <div class="date" id="print-header-date"></div>
       </div>
       <div id="sheet-table"></div>
+      <div id="sheet-notes"></div>
     </div>
 
     <div id="customers-view" class="view">
@@ -360,6 +383,15 @@ sheetDateInput.value = defaultDispatchDateStr();
 sheetDateInput.addEventListener("change", loadSheet);
 document.getElementById("sheet-print").addEventListener("click", () => window.print());
 
+let productCategoriesCache = null;
+async function getProductCategories() {
+  if (!productCategoriesCache) {
+    const res = await api("/api/products");
+    productCategoriesCache = await res.json();
+  }
+  return productCategoriesCache;
+}
+
 async function loadSheet() {
   const dateStr = sheetDateInput.value || defaultDispatchDateStr();
   const { y, m, d } = parseDateStr(dateStr);
@@ -367,8 +399,8 @@ async function loadSheet() {
   const windowStart = windowEnd - 24 * 3600 * 1000;
   const isOpen = windowEnd > Date.now();
 
-  const res = await api("/api/orders");
-  const all = await res.json();
+  const [ordersRes, categories] = await Promise.all([api("/api/orders"), getProductCategories()]);
+  const all = await ordersRes.json();
   const list = all
     .filter((o) => o.status === "confirmed" && o.reviewedAt >= windowStart && o.reviewedAt < windowEnd)
     .sort((a, b) => a.reviewedAt - b.reviewedAt);
@@ -383,35 +415,82 @@ async function loadSheet() {
     <span>Window: ${esc(prevDayLabel)} 2:00 PM → ${esc(cutoffLabel)} (Harare time)</span>
     <span class="badge ${isOpen ? "open-window" : "closed-window"}">${isOpen ? "Still accumulating" : "Closed — final"}</span>
   `;
-  document.getElementById("print-header-sub").textContent =
-    `Dispatch window ending ${cutoffLabel} — generated ${new Date().toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  document.getElementById("print-header-date").textContent =
+    new Date(windowEnd).toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   const tableEl = document.getElementById("sheet-table");
+  const notesEl = document.getElementById("sheet-notes");
+
   if (list.length === 0) {
     tableEl.innerHTML = `<div id="orders-empty">No confirmed orders in this window yet.</div>`;
+    notesEl.innerHTML = "";
     return;
   }
 
-  tableEl.innerHTML = `
-    <table>
-      <thead>
-        <tr><th>Time</th><th>Name / Outlet</th><th>Phone</th><th>Fulfillment</th><th>When / Notes</th><th>Items</th><th>Total</th></tr>
-      </thead>
-      <tbody>
-        ${list.map((o) => `
-          <tr>
-            <td>${new Date(o.reviewedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
-            <td>${esc(o.name)}</td>
-            <td>${esc(o.phone)}</td>
-            <td>${esc(o.fulfillment)}</td>
-            <td>${esc(o.requestedFor || "ASAP")}${o.orderNotes ? `<br><span style="color:var(--muted)">${esc(o.orderNotes)}</span>` : ""}</td>
-            <td style="white-space: pre-wrap;">${esc(orderItemsText(o))}</td>
-            <td>$${esc(o.total)}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
+  // Flatten orders into one row per outlet — a merchandise order contributes
+  // one row per shop; a singular order contributes one row for itself.
+  const outletRows = [];
+  for (const o of list) {
+    if (o.shops) {
+      for (const s of o.shops) {
+        outletRows.push({ outlet: s.name, currency: o.currency || "USD", orderNo: o.id, items: s.items || [] });
+      }
+    } else {
+      outletRows.push({ outlet: o.name, currency: o.currency || "USD", orderNo: o.id, items: o.items || [] });
+    }
+  }
+
+  tableEl.innerHTML = categories
+    .map((cat) => {
+      const productIds = new Set(cat.products.map((p) => p.id));
+      const rows = outletRows.filter((r) => r.items.some((i) => productIds.has(i.id)));
+      if (rows.length === 0) return "";
+
+      const colTotal = (row) => cat.products.reduce((sum, p) => sum + (row.items.find((i) => i.id === p.id)?.qty || 0), 0);
+      const qtyCell = (row, p) => {
+        const qty = row.items.find((i) => i.id === p.id)?.qty;
+        return qty ? qty : `<span class="qty-blank">—</span>`;
+      };
+
+      const colSubtotal = (p) => rows.reduce((sum, r) => sum + (r.items.find((i) => i.id === p.id)?.qty || 0), 0);
+      const grandTotal = rows.reduce((sum, r) => sum + colTotal(r), 0);
+
+      return `
+        <div class="category-block">
+          <h3>${esc(cat.label)}</h3>
+          <table class="pivot-table">
+            <thead>
+              <tr>
+                <th>Outlet</th><th>Currency</th><th>Order No.</th>
+                ${cat.products.map((p) => `<th>${esc(p.name)}</th>`).join("")}
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((r) => `
+                <tr>
+                  <td class="outlet-name">${esc(r.outlet)}</td>
+                  <td>${esc(r.currency)}</td>
+                  <td>${esc(r.orderNo)}</td>
+                  ${cat.products.map((p) => `<td>${qtyCell(r, p)}</td>`).join("")}
+                  <td><strong>${colTotal(r)}</strong></td>
+                </tr>
+              `).join("")}
+              <tr class="subtotal-row">
+                <td class="outlet-name">Units subtotal</td>
+                <td></td><td></td>
+                ${cat.products.map((p) => `<td>${colSubtotal(p)}</td>`).join("")}
+                <td>${grandTotal}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    })
+    .join("");
+
+  const notes = list.filter((o) => o.orderNotes).map((o) => `<div><strong>${esc(o.name)}:</strong> ${esc(o.orderNotes)}</div>`);
+  notesEl.innerHTML = notes.length ? `<h3>Additional orders / notes</h3>${notes.join("")}` : "";
 }
 
 // ─── Customers tab ──────────────────────────────────────────────────────────
