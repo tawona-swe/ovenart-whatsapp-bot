@@ -128,24 +128,30 @@
   tbody tr:hover { background: var(--bg); }
   #customers-empty, #orders-empty { padding: 20px; color: var(--muted); font-size: 14px; }
 
-  /* ─── Verification view ───────────────────────────────────────────────── */
+  /* ─── Orders view ─────────────────────────────────────────────────────── */
   #orders-view { flex-direction: column; overflow-y: auto; background: var(--panel); }
-  #orders-view h1 { font-size: 15px; padding: 16px 20px; margin: 0; border-bottom: 1px solid var(--border); }
+  #orders-view h1 { font-size: 15px; padding: 16px 20px 2px; margin: 0; }
+  #orders-view .sub { font-size: 12.5px; color: var(--muted); padding: 0 20px 14px; border-bottom: 1px solid var(--border); }
   #orders-list { display: flex; flex-direction: column; }
-  .order-card { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: flex-start; }
-  .order-card .main { flex: 1; min-width: 0; }
-  .order-card .top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-  .order-card .name { font-weight: 600; font-size: 14px; }
-  .order-card .meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .order-card .items { font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
+  td.items-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+  .muted-inline { color: var(--muted); font-size: 12px; }
   .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; }
   .badge.pending { background: var(--accent-soft); color: var(--accent); }
   .badge.confirmed { background: var(--open-soft); color: var(--open); }
   .badge.rejected { background: var(--closed-soft); color: var(--closed); }
-  .order-actions { display: flex; gap: 8px; flex-shrink: 0; }
-  .order-actions button { border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .order-actions { display: flex; gap: 8px; }
+  .order-actions button { border: none; border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
   .btn-approve { background: var(--open); color: #fff; }
   .btn-reject { background: var(--closed); color: #fff; }
+  #orders-pagination {
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    padding: 14px 20px; font-size: 13px; color: var(--muted);
+  }
+  #orders-pagination button {
+    border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+    padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--navy);
+  }
+  #orders-pagination button:disabled { opacity: .4; cursor: not-allowed; }
 
   /* ─── Daily Sheet view ────────────────────────────────────────────────── */
   #sheet-view { flex-direction: column; overflow-y: auto; background: var(--panel); }
@@ -197,7 +203,7 @@
   <div id="tabs">
     <img src="/images/logo.png" alt="Oven Art">
     <button id="tab-inbox" class="active">Inbox</button>
-    <button id="tab-verification">Verification</button>
+    <button id="tab-orders">Orders</button>
     <button id="tab-sheet">Daily Sheet</button>
     <button id="tab-customers">Customers</button>
   </div>
@@ -211,7 +217,8 @@
     </div>
 
     <div id="orders-view" class="view">
-      <h1>Order verification — outlets outside Harare need manual review</h1>
+      <h1>Orders</h1>
+      <div class="sub">Pending orders (outlets outside Harare) need manual approve/reject below.</div>
       <div id="orders-list"></div>
     </div>
 
@@ -304,25 +311,25 @@ function parseDateStr(str) {
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────
-const TABS = ["inbox", "verification", "sheet", "customers"];
+const TABS = ["inbox", "orders", "sheet", "customers"];
 function switchTab(tab) {
   activeTab = tab;
   for (const t of TABS) {
     document.getElementById(`tab-${t}`).classList.toggle("active", t === tab);
   }
   document.getElementById("inbox-view").classList.toggle("active", tab === "inbox");
-  document.getElementById("orders-view").classList.toggle("active", tab === "verification");
+  document.getElementById("orders-view").classList.toggle("active", tab === "orders");
   document.getElementById("sheet-view").classList.toggle("active", tab === "sheet");
   document.getElementById("customers-view").classList.toggle("active", tab === "customers");
   if (tab === "customers") loadCustomers();
-  if (tab === "verification") loadOrders();
+  if (tab === "orders") { ordersPage = 1; loadOrders(); }
   if (tab === "sheet") loadSheet();
 }
 for (const t of TABS) {
   document.getElementById(`tab-${t}`).addEventListener("click", () => switchTab(t));
 }
 
-// ─── Verification tab ───────────────────────────────────────────────────────
+// ─── Orders tab ───────────────────────────────────────────────────────────────
 /** Plain-text items display — grouped by shop for merchandise orders. */
 function orderItemsText(o) {
   if (o.shops) {
@@ -331,9 +338,25 @@ function orderItemsText(o) {
   return o.itemsText.split("; ").join("\n");
 }
 
+function summarizeItems(o) {
+  if (o.shops) {
+    const lines = o.shops.reduce((sum, s) => sum + s.itemsText.split("; ").length, 0);
+    return `${o.shops.length} shop${o.shops.length === 1 ? "" : "s"}, ${lines} line${lines === 1 ? "" : "s"}`;
+  }
+  const n = o.itemsText.split("; ").length;
+  return `${n} line${n === 1 ? "" : "s"}`;
+}
+
+const ORDERS_PAGE_SIZE = 25;
+let ordersPage = 1;
+
 async function loadOrders() {
   const res = await api("/api/orders");
   const list = await res.json();
+  renderOrdersTable(list);
+}
+
+function renderOrdersTable(list) {
   const el = document.getElementById("orders-list");
 
   if (list.length === 0) {
@@ -341,30 +364,53 @@ async function loadOrders() {
     return;
   }
 
-  el.innerHTML = list.map((o) => `
-    <div class="order-card" data-id="${o.id}">
-      <div class="main">
-        <div class="top">
-          <span class="name">${esc(o.name)}</span>
-          <span class="badge ${o.status}">${o.status}</span>
-        </div>
-        <div class="meta">${esc(o.phone)} — ${esc(o.address)} (${esc(o.city || "unknown city")})</div>
-        <div class="meta">${esc(o.fulfillment)}${o.shops ? ` — ${o.shops.length} shops` : ""} — Total $${esc(o.total)} — ${fmtTime(o.createdAt)}</div>
-        <div class="meta">When: ${esc(o.requestedFor || "ASAP")}${o.orderNotes ? ` — Notes: ${esc(o.orderNotes)}` : ""}</div>
-        <div class="items">${esc(orderItemsText(o))}</div>
-      </div>
-      ${o.status === "pending" ? `
-        <div class="order-actions">
-          <button class="btn-approve" data-action="approve" data-id="${o.id}">Approve</button>
-          <button class="btn-reject" data-action="reject" data-id="${o.id}">Reject</button>
-        </div>
-      ` : ""}
+  const totalPages = Math.max(1, Math.ceil(list.length / ORDERS_PAGE_SIZE));
+  ordersPage = Math.min(Math.max(1, ordersPage), totalPages);
+  const start = (ordersPage - 1) * ORDERS_PAGE_SIZE;
+  const pageItems = list.slice(start, start + ORDERS_PAGE_SIZE);
+
+  el.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th><th>Outlet</th><th>City</th><th>Fulfillment</th>
+          <th>Currency</th><th>Total</th><th>When</th><th>Items</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${pageItems.map((o) => `
+          <tr data-id="${o.id}">
+            <td>${fmtTime(o.createdAt)}</td>
+            <td>${esc(o.name)}</td>
+            <td>${esc(o.city || "—")}</td>
+            <td>${esc(o.fulfillment)}</td>
+            <td>${esc(o.currency || "USD")}</td>
+            <td>$${esc(o.total)}</td>
+            <td>${esc(o.requestedFor || "ASAP")}${o.orderNotes ? ` <span class="muted-inline" title="${esc(o.orderNotes)}">📝</span>` : ""}</td>
+            <td class="items-cell" title="${esc(orderItemsText(o))}">${esc(summarizeItems(o))}</td>
+            <td><span class="badge ${o.status}">${o.status}</span></td>
+            <td>${o.status === "pending" ? `
+              <div class="order-actions">
+                <button class="btn-approve" data-action="approve" data-id="${o.id}">Approve</button>
+                <button class="btn-reject" data-action="reject" data-id="${o.id}">Reject</button>
+              </div>
+            ` : ""}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    <div id="orders-pagination">
+      <button id="orders-prev" ${ordersPage === 1 ? "disabled" : ""}>‹ Prev</button>
+      <span>Page ${ordersPage} of ${totalPages} (${list.length} order${list.length === 1 ? "" : "s"})</span>
+      <button id="orders-next" ${ordersPage === totalPages ? "disabled" : ""}>Next ›</button>
     </div>
-  `).join("");
+  `;
 
   el.querySelectorAll("button[data-action]").forEach((btn) => {
     btn.addEventListener("click", () => reviewOrder(btn.dataset.id, btn.dataset.action));
   });
+  document.getElementById("orders-prev")?.addEventListener("click", () => { ordersPage--; renderOrdersTable(list); });
+  document.getElementById("orders-next")?.addEventListener("click", () => { ordersPage++; renderOrdersTable(list); });
 }
 
 async function reviewOrder(id, action) {
@@ -640,7 +686,7 @@ async function sendReply() {
 loadConversations();
 setInterval(() => { if (activeTab === "inbox") loadConversations(); }, 5000);
 setInterval(() => { if (activeTab === "customers") loadCustomers(); }, 5000);
-setInterval(() => { if (activeTab === "verification") loadOrders(); }, 5000);
+setInterval(() => { if (activeTab === "orders") loadOrders(); }, 5000);
 setInterval(() => { if (activeTab === "sheet") loadSheet(); }, 10000);
 setInterval(tickCountdowns, 30000);
 </script>
