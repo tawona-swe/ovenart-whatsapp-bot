@@ -6,16 +6,23 @@
 <title>Oven Art — Dashboard</title>
 <style>
   :root {
-    --bg: #f4f3f1;
+    /* Sampled from public/images/logo.png — Oven Art's real palette */
+    --bg: #F2F4F6;
     --panel: #ffffff;
-    --border: #e2ddd6;
-    --ink: #241f1a;
-    --muted: #7a7166;
-    --accent: #b9860c;
-    --open: #2f8f5b;
-    --closed: #b23a3a;
-    --bubble-in: #efece7;
-    --bubble-out: #fdf1d6;
+    --border: #E1E6EA;
+    --ink: #15202B;
+    --muted: #5C6B7A;
+    --navy: #0A3758;
+    --navy-dark: #121E36;
+    --accent: #EA713C;
+    --accent-soft: #FCE4D6;
+    --gold: #F7B916;
+    --open: #088D58;
+    --open-soft: #DFF2E7;
+    --closed: #C0392B;
+    --closed-soft: #FBE1DD;
+    --bubble-in: #EEF1F4;
+    --bubble-out: var(--accent-soft);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -30,23 +37,25 @@
 
   #tabs {
     display: flex;
+    align-items: center;
     gap: 2px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
+    background: var(--navy);
     flex-shrink: 0;
-    padding: 0 8px;
+    padding: 0 10px;
   }
+  #tabs img { height: 30px; margin: 8px 12px 8px 4px; border-radius: 4px; }
   #tabs button {
     border: none;
     background: none;
-    padding: 14px 16px;
+    padding: 16px 16px;
     font-size: 14px;
     font-weight: 600;
-    color: var(--muted);
+    color: rgba(255, 255, 255, .62);
     cursor: pointer;
     border-bottom: 2px solid transparent;
   }
-  #tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  #tabs button:hover { color: rgba(255, 255, 255, .85); }
+  #tabs button.active { color: #fff; border-bottom-color: var(--gold); }
 
   #views { flex: 1; min-height: 0; display: flex; }
   .view { flex: 1; display: none; min-width: 0; }
@@ -101,8 +110,8 @@
   #reply-bar { padding: 14px 20px; background: var(--panel); border-top: 1px solid var(--border); display: flex; gap: 10px; }
   #reply-text { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; resize: none; font-family: inherit; }
   #reply-send { padding: 0 20px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
-  #reply-send:disabled { background: #cfc8ba; cursor: not-allowed; }
-  #reply-warning { padding: 8px 20px; font-size: 12.5px; color: var(--closed); background: #fbe1e1; display: none; }
+  #reply-send:disabled { background: #C7CED4; cursor: not-allowed; }
+  #reply-warning { padding: 8px 20px; font-size: 12.5px; color: var(--closed); background: var(--closed-soft); display: none; }
 
   #empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
 
@@ -129,9 +138,9 @@
   .order-card .meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
   .order-card .items { font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
   .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; }
-  .badge.pending { background: #fdf1d6; color: var(--accent); }
-  .badge.confirmed { background: #e3f3e9; color: var(--open); }
-  .badge.rejected { background: #fbe1e1; color: var(--closed); }
+  .badge.pending { background: var(--accent-soft); color: var(--accent); }
+  .badge.confirmed { background: var(--open-soft); color: var(--open); }
+  .badge.rejected { background: var(--closed-soft); color: var(--closed); }
   .order-actions { display: flex; gap: 8px; flex-shrink: 0; }
   .order-actions button { border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .btn-approve { background: var(--open); color: #fff; }
@@ -140,6 +149,7 @@
 </head>
 <body>
   <div id="tabs">
+    <img src="/images/logo.png" alt="Oven Art">
     <button id="tab-inbox" class="active">Inbox</button>
     <button id="tab-verification">Verification</button>
     <button id="tab-customers">Customers</button>

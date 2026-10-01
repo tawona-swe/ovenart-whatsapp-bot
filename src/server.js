@@ -132,6 +132,9 @@ function requireDashboardAuth(req, res, next) {
 app.get("/dashboard", requireDashboardAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
 });
+// Scoped to just /images (not the whole public/ dir) so dashboard.html stays
+// reachable only through the authed route above, never served statically.
+app.use("/images", express.static(path.join(__dirname, "..", "public", "images")));
 app.use("/api", requireDashboardAuth);
 
 app.get("/api/customers", (_req, res) => {
