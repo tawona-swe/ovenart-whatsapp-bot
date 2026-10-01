@@ -146,6 +146,30 @@
   .order-actions button { border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .btn-approve { background: var(--open); color: #fff; }
   .btn-reject { background: var(--closed); color: #fff; }
+
+  /* ─── Daily Sheet view ────────────────────────────────────────────────── */
+  #sheet-view { flex-direction: column; overflow-y: auto; background: var(--panel); }
+  #sheet-toolbar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  #sheet-toolbar h1 { font-size: 15px; margin: 0; flex: 1; min-width: 200px; }
+  #sheet-date { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13.5px; font-family: inherit; }
+  #sheet-print { border: none; border-radius: 8px; padding: 9px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer; background: var(--navy); color: #fff; }
+  #sheet-summary { font-size: 12.5px; color: var(--muted); padding: 10px 20px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #sheet-summary b { color: var(--ink); }
+  .badge.open-window { background: var(--open-soft); color: var(--open); }
+  .badge.closed-window { background: var(--border); color: var(--muted); }
+
+  #print-header { display: none; }
+  @media print {
+    #tabs, #sheet-toolbar { display: none !important; }
+    body, #views, #sheet-view { display: block !important; overflow: visible !important; height: auto !important; }
+    #print-header { display: block; padding: 0 0 12px; }
+    #print-header h2 { margin: 0 0 2px; font-size: 18px; }
+    #print-header div { font-size: 12px; color: #555; }
+    table { font-size: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -153,6 +177,7 @@
     <img src="/images/logo.png" alt="Oven Art">
     <button id="tab-inbox" class="active">Inbox</button>
     <button id="tab-verification">Verification</button>
+    <button id="tab-sheet">Daily Sheet</button>
     <button id="tab-customers">Customers</button>
   </div>
 
@@ -167,6 +192,20 @@
     <div id="orders-view" class="view">
       <h1>Order verification — outlets outside Harare need manual review</h1>
       <div id="orders-list"></div>
+    </div>
+
+    <div id="sheet-view" class="view">
+      <div id="sheet-toolbar">
+        <h1>Daily dispatch sheet</h1>
+        <input type="date" id="sheet-date">
+        <button id="sheet-print">Print</button>
+      </div>
+      <div id="sheet-summary"></div>
+      <div id="print-header">
+        <h2>Oven Art Bakery — Dispatch Sheet</h2>
+        <div id="print-header-sub"></div>
+      </div>
+      <div id="sheet-table"></div>
     </div>
 
     <div id="customers-view" class="view">
@@ -208,8 +247,41 @@ function fmtCountdown(expiresAt) {
   return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
 }
 
+// ─── Dispatch window math (Africa/Harare is fixed UTC+2, no DST) ───────────
+// A dispatch window for date D covers confirmations from D-1 14:00 to D 14:00
+// Harare time — i.e. 12:00 UTC the previous day to 12:00 UTC on D. Anything
+// confirmed after D's 2pm cutoff automatically falls into D+1's window.
+const CUTOFF_UTC_HOUR = 12; // 14:00 Harare == 12:00 UTC
+
+function windowEndMs(y, m, d) {
+  return Date.UTC(y, m - 1, d, CUTOFF_UTC_HOUR, 0, 0);
+}
+
+/** {y,m,d} of "now" as a Harare calendar date (UTC+2 shift trick). */
+function hararePartsNow() {
+  const shifted = new Date(Date.now() + 2 * 3600 * 1000);
+  return { y: shifted.getUTCFullYear(), m: shifted.getUTCMonth() + 1, d: shifted.getUTCDate() };
+}
+
+/** Today's window if before 2pm Harare, otherwise tomorrow's (the one now accumulating). */
+function defaultDispatchDateStr() {
+  const shifted = new Date(Date.now() + 2 * 3600 * 1000);
+  const hour = shifted.getUTCHours();
+  let { y, m, d } = hararePartsNow();
+  if (hour >= 14) {
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    y = next.getUTCFullYear(); m = next.getUTCMonth() + 1; d = next.getUTCDate();
+  }
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function parseDateStr(str) {
+  const [y, m, d] = str.split("-").map(Number);
+  return { y, m, d };
+}
+
 // ─── Tabs ─────────────────────────────────────────────────────────────────
-const TABS = ["inbox", "verification", "customers"];
+const TABS = ["inbox", "verification", "sheet", "customers"];
 function switchTab(tab) {
   activeTab = tab;
   for (const t of TABS) {
@@ -217,9 +289,11 @@ function switchTab(tab) {
   }
   document.getElementById("inbox-view").classList.toggle("active", tab === "inbox");
   document.getElementById("orders-view").classList.toggle("active", tab === "verification");
+  document.getElementById("sheet-view").classList.toggle("active", tab === "sheet");
   document.getElementById("customers-view").classList.toggle("active", tab === "customers");
   if (tab === "customers") loadCustomers();
   if (tab === "verification") loadOrders();
+  if (tab === "sheet") loadSheet();
 }
 for (const t of TABS) {
   document.getElementById(`tab-${t}`).addEventListener("click", () => switchTab(t));
@@ -269,6 +343,65 @@ async function reviewOrder(id, action) {
     return;
   }
   await loadOrders();
+}
+
+// ─── Daily Sheet tab ──────────────────────────────────────────────────────────
+const sheetDateInput = document.getElementById("sheet-date");
+sheetDateInput.value = defaultDispatchDateStr();
+sheetDateInput.addEventListener("change", loadSheet);
+document.getElementById("sheet-print").addEventListener("click", () => window.print());
+
+async function loadSheet() {
+  const dateStr = sheetDateInput.value || defaultDispatchDateStr();
+  const { y, m, d } = parseDateStr(dateStr);
+  const windowEnd = windowEndMs(y, m, d);
+  const windowStart = windowEnd - 24 * 3600 * 1000;
+  const isOpen = windowEnd > Date.now();
+
+  const res = await api("/api/orders");
+  const all = await res.json();
+  const list = all
+    .filter((o) => o.status === "confirmed" && o.reviewedAt >= windowStart && o.reviewedAt < windowEnd)
+    .sort((a, b) => a.reviewedAt - b.reviewedAt);
+
+  const cutoffLabel = new Date(windowEnd).toLocaleString([], {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+  const prevDayLabel = new Date(windowStart).toLocaleString([], { month: "short", day: "numeric" });
+
+  document.getElementById("sheet-summary").innerHTML = `
+    <span><b>${list.length}</b> order${list.length === 1 ? "" : "s"}</span>
+    <span>Window: ${esc(prevDayLabel)} 2:00 PM → ${esc(cutoffLabel)} (Harare time)</span>
+    <span class="badge ${isOpen ? "open-window" : "closed-window"}">${isOpen ? "Still accumulating" : "Closed — final"}</span>
+  `;
+  document.getElementById("print-header-sub").textContent =
+    `Dispatch window ending ${cutoffLabel} — generated ${new Date().toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+
+  const tableEl = document.getElementById("sheet-table");
+  if (list.length === 0) {
+    tableEl.innerHTML = `<div id="orders-empty">No confirmed orders in this window yet.</div>`;
+    return;
+  }
+
+  tableEl.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Name / Outlet</th><th>Phone</th><th>Fulfillment</th><th>Items</th><th>Total</th></tr>
+      </thead>
+      <tbody>
+        ${list.map((o) => `
+          <tr>
+            <td>${new Date(o.reviewedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+            <td>${esc(o.name)}</td>
+            <td>${esc(o.phone)}</td>
+            <td>${esc(o.fulfillment)}</td>
+            <td>${esc(o.itemsText.split("; ").join(", "))}</td>
+            <td>$${esc(o.total)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
 }
 
 // ─── Customers tab ──────────────────────────────────────────────────────────
@@ -419,6 +552,7 @@ loadConversations();
 setInterval(() => { if (activeTab === "inbox") loadConversations(); }, 5000);
 setInterval(() => { if (activeTab === "customers") loadCustomers(); }, 5000);
 setInterval(() => { if (activeTab === "verification") loadOrders(); }, 5000);
+setInterval(() => { if (activeTab === "sheet") loadSheet(); }, 10000);
 setInterval(tickCountdowns, 30000);
 </script>
 </body>
