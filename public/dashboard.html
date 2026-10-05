@@ -184,18 +184,42 @@
   .pivot-table thead th { background: var(--bg); font-size: 10.5px; text-transform: uppercase; color: var(--muted); }
   .pivot-table td.outlet-name { text-align: left; font-weight: 600; white-space: normal; }
   .pivot-table tr.subtotal-row td { background: var(--accent-soft); font-weight: 700; }
+  .pivot-table tr.grand-total-row td { background: var(--navy); color: #fff; font-weight: 700; }
   .pivot-table td.qty-blank { color: var(--border); }
+  #sheet-grand-total {
+    margin: 0 20px 20px; padding: 10px 14px; background: var(--navy); color: #fff;
+    font-size: 13px; font-weight: 700; display: flex; justify-content: space-between; border-radius: 4px;
+  }
   #sheet-notes { margin: 0 20px 20px; font-size: 12.5px; }
   #sheet-notes h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
   #sheet-notes div { padding: 3px 0; }
 
   @media print {
+    /* Plain black-and-white sheet, not a printout of the coloured webapp —
+       collapsing the brand tokens to print-safe values means every rule
+       built on them (badges, subtotal shading, category bands) follows
+       along for free, without overriding each one by hand. */
+    :root {
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --border: #000000;
+      --ink: #000000;
+      --muted: #333333;
+      --navy: #000000;
+      --accent: #000000;
+      --accent-soft: #e6e6e6;
+      --open: #000000;
+      --open-soft: #e6e6e6;
+      --closed: #000000;
+      --closed-soft: #e6e6e6;
+    }
     @page { size: landscape; margin: 12mm; }
-    #tabs, #sheet-toolbar { display: none !important; }
+    #tabs, #sheet-toolbar, #sheet-summary { display: none !important; }
     body, #views, #sheet-view { display: block !important; overflow: visible !important; height: auto !important; }
     #print-header { display: block; padding: 0 0 14px; }
     .category-block { margin: 0 0 16px; break-inside: avoid; }
     .pivot-table { font-size: 10.5px; }
+    #sheet-grand-total { break-inside: avoid; }
   }
 </style>
 </head>
@@ -235,6 +259,7 @@
         <div class="date" id="print-header-date"></div>
       </div>
       <div id="sheet-table"></div>
+      <div id="sheet-grand-total"></div>
       <div id="sheet-notes"></div>
     </div>
 
@@ -469,6 +494,7 @@ async function loadSheet() {
 
   if (list.length === 0) {
     tableEl.innerHTML = `<div id="orders-empty">No confirmed orders in this window yet.</div>`;
+    document.getElementById("sheet-grand-total").innerHTML = "";
     notesEl.innerHTML = "";
     return;
   }
@@ -486,6 +512,16 @@ async function loadSheet() {
     }
   }
 
+  // The real paper sheet merges categories that share the exact same
+  // product columns into one combined "Grand Total Units" row (e.g. its
+  // Frozen Bread and Fresh Bread sections are the same bread types, just
+  // different stock state). Our catalog currently has no two categories
+  // sharing a single product — each product sits in exactly one category
+  // — so that merge never has anything to merge yet; it'll apply itself
+  // automatically the day the catalog grows a matching pair of categories.
+  // What's always meaningful regardless is one true overall total, below.
+  let overallTotal = 0;
+
   tableEl.innerHTML = categories
     .map((cat) => {
       const productIds = new Set(cat.products.map((p) => p.id));
@@ -499,7 +535,8 @@ async function loadSheet() {
       };
 
       const colSubtotal = (p) => rows.reduce((sum, r) => sum + (r.items.find((i) => i.id === p.id)?.qty || 0), 0);
-      const grandTotal = rows.reduce((sum, r) => sum + colTotal(r), 0);
+      const categoryTotal = rows.reduce((sum, r) => sum + colTotal(r), 0);
+      overallTotal += categoryTotal;
 
       return `
         <div class="category-block">
@@ -526,7 +563,7 @@ async function loadSheet() {
                 <td class="outlet-name">Units subtotal</td>
                 <td></td><td></td>
                 ${cat.products.map((p) => `<td>${colSubtotal(p)}</td>`).join("")}
-                <td>${grandTotal}</td>
+                <td>${categoryTotal}</td>
               </tr>
             </tbody>
           </table>
@@ -534,6 +571,9 @@ async function loadSheet() {
       `;
     })
     .join("");
+
+  document.getElementById("sheet-grand-total").innerHTML =
+    `<span>Grand total units — whole sheet</span><span>${overallTotal}</span>`;
 
   const notes = list.filter((o) => o.orderNotes).map((o) => `<div><strong>${esc(o.name)}:</strong> ${esc(o.orderNotes)}</div>`);
   notesEl.innerHTML = notes.length ? `<h3>Additional orders / notes</h3>${notes.join("")}` : "";
