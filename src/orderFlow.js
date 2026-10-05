@@ -108,7 +108,6 @@ async function sendAddShopPrompt(phone, shops) {
 async function sendCurrencyChoice(phone) {
   await sendButtons(phone, "Which currency is this order in?", [
     { id: "currency_usd", title: "USD" },
-    { id: "currency_zwl", title: "ZWL" },
     { id: "currency_zig", title: "ZIG" },
   ]);
 }
@@ -575,7 +574,7 @@ async function handleIncoming(phone, input) {
 
     // ── Shared: currency + timing + notes (both order types funnel through here) ──
     case "CURRENCY_CHOICE": {
-      const currencies = { currency_usd: "USD", currency_zwl: "ZWL", currency_zig: "ZIG" };
+      const currencies = { currency_usd: "USD", currency_zig: "ZIG" };
       if (currencies[lower]) {
         session.currency = currencies[lower];
         session.state = "TIMING_CHOICE";
