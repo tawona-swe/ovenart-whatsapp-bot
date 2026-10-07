@@ -220,6 +220,24 @@
     .category-block { margin: 0 0 16px; break-inside: avoid; }
     .pivot-table { font-size: 10.5px; }
     #sheet-grand-total { break-inside: avoid; }
+
+    /* These relied on a dark fill behind white text for contrast — most
+       browsers print with "Background graphics" off by default, which
+       drops the fill but keeps the white text, making it invisible.
+       Print-safe version: black text + a border, no fill to lose. */
+    .category-block h3 {
+      background: none; color: #000; padding: 4px 0;
+      border-bottom: 2px solid #000;
+    }
+    .pivot-table tr.grand-total-row td {
+      background: none; color: #000; font-weight: 700;
+      border-top: 2px solid #000; border-bottom: 2px solid #000;
+    }
+    #sheet-grand-total {
+      background: none; color: #000; font-weight: 700;
+      border-top: 2px solid #000; border-bottom: 2px solid #000;
+      padding: 8px 0;
+    }
   }
 </style>
 </head>
