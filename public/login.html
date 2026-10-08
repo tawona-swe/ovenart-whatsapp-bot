@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oven Art — Sign in</title>
+<style>
+  :root {
+    /* Same palette as the dashboard — sampled from public/images/logo.png */
+    --bg: #F2F4F6;
+    --panel: #ffffff;
+    --border: #E1E6EA;
+    --ink: #15202B;
+    --muted: #5C6B7A;
+    --navy: #0A3758;
+    --navy-dark: #121E36;
+    --accent: #EA713C;
+    --accent-soft: #FCE4D6;
+    --closed: #C0392B;
+    --closed-soft: #FBE1DD;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #card {
+    width: 100%;
+    max-width: 340px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px 28px 28px;
+    box-shadow: 0 1px 3px rgba(10, 55, 88, 0.08);
+  }
+  #card img { display: block; width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 12px; }
+  h1 { font-size: 17px; text-align: center; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: var(--muted); text-align: center; margin: 0 0 24px; }
+  label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+  input {
+    width: 100%; padding: 10px 12px; margin-bottom: 16px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--ink);
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--panel); }
+  button {
+    width: 100%; padding: 11px; border: none; border-radius: 8px; background: var(--navy); color: #fff;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: not-allowed; }
+  #error {
+    display: none; margin: 0 0 16px; padding: 9px 12px; border-radius: 8px;
+    background: var(--closed-soft); color: var(--closed); font-size: 13px;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0D1626; }
+    :root { --panel: #121E36; --border: #27374E; --ink: #EDF1F5; --muted: #96A5B7; --bg: #0D1626; }
+    input { background: #0D1626; }
+    input:focus { background: #121E36; }
+  }
+</style>
+</head>
+<body>
+  <div id="card">
+    <img src="/images/logo.png" alt="Oven Art">
+    <h1>Staff sign in</h1>
+    <p class="sub">Oven Art Bakery dashboard</p>
+    <div id="error"></div>
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" autofocus required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button id="submit" type="submit">Sign in</button>
+    </form>
+  </div>
+<script>
+const form = document.getElementById("login-form");
+const errorEl = document.getElementById("error");
+const submitBtn = document.getElementById("submit");
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  errorEl.style.display = "none";
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Signing in…";
+
+  try {
+    const res = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value,
+      }),
+    });
+    if (res.ok) {
+      window.location.href = "/dashboard";
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    errorEl.textContent = data.error || "Sign in failed — please try again.";
+    errorEl.style.display = "block";
+  } catch (err) {
+    errorEl.textContent = "Couldn't reach the server — check your connection and try again.";
+    errorEl.style.display = "block";
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Sign in";
+  }
+});
+</script>
+</body>
+</html>

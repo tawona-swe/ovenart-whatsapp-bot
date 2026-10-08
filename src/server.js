@@ -1,5 +1,6 @@
 require("dotenv").config();
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const { handleIncoming, handleCatalogOrder, approveOrder, rejectOrder } = require("./orderFlow");
 const { sendText } = require("./whatsapp");
@@ -18,6 +19,7 @@ if (missingEnv.length > 0) {
 }
 
 const app = express();
+app.set("trust proxy", 1); // Render terminates TLS upstream — needed for req.secure to reflect it
 app.use(express.json());
 
 const startTime = Date.now();
@@ -112,31 +114,96 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ─── Sales dashboard — live inbox, protected by HTTP Basic Auth ───────────────
-function requireDashboardAuth(req, res, next) {
+// ─── Sales dashboard — live inbox, protected by a signed-cookie session ───────
+// Still one shared username/password (env vars), not per-person accounts —
+// this just replaces the browser's native Basic Auth popup with our own
+// login page. The cookie is an HMAC of a fixed string keyed on the current
+// DASHBOARD_PASSWORD, so it needs no session store (survives restarts) and
+// rotating the password on Render instantly invalidates every old cookie.
+const DASHBOARD_COOKIE = "oa_dash";
+
+function dashboardToken() {
+  return crypto.createHmac("sha256", process.env.DASHBOARD_PASSWORD).update("oven-art-dashboard").digest("hex");
+}
+
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+}
+
+function getCookie(req, name) {
+  const header = req.headers.cookie || "";
+  for (const part of header.split(";")) {
+    const i = part.indexOf("=");
+    if (i === -1) continue;
+    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+
+/** null = dashboard not configured, otherwise whether this request is authed. */
+function dashboardAuthStatus(req) {
+  const { DASHBOARD_USERNAME, DASHBOARD_PASSWORD } = process.env;
+  if (!DASHBOARD_USERNAME || !DASHBOARD_PASSWORD) return null;
+  const cookie = getCookie(req, DASHBOARD_COOKIE);
+  return !!cookie && safeEqual(cookie, dashboardToken());
+}
+
+function requireDashboardPage(req, res, next) {
+  const authed = dashboardAuthStatus(req);
+  if (authed === null) {
+    return res.status(503).send("Dashboard not configured — set DASHBOARD_USERNAME/DASHBOARD_PASSWORD.");
+  }
+  if (!authed) return res.redirect("/login");
+  next();
+}
+
+function requireDashboardApi(req, res, next) {
+  const authed = dashboardAuthStatus(req);
+  if (authed === null) return res.status(503).json({ error: "Dashboard not configured" });
+  if (!authed) return res.sendStatus(401);
+  next();
+}
+
+app.get("/login", (req, res) => {
   const { DASHBOARD_USERNAME, DASHBOARD_PASSWORD } = process.env;
   if (!DASHBOARD_USERNAME || !DASHBOARD_PASSWORD) {
     return res.status(503).send("Dashboard not configured — set DASHBOARD_USERNAME/DASHBOARD_PASSWORD.");
   }
+  if (dashboardAuthStatus(req)) return res.redirect("/dashboard");
+  res.sendFile(path.join(__dirname, "..", "public", "login.html"));
+});
 
-  const header = req.headers.authorization || "";
-  const [scheme, encoded] = header.split(" ");
-  if (scheme === "Basic" && encoded) {
-    const [user, pass] = Buffer.from(encoded, "base64").toString().split(":");
-    if (user === DASHBOARD_USERNAME && pass === DASHBOARD_PASSWORD) return next();
+app.post("/login", (req, res) => {
+  const { DASHBOARD_USERNAME, DASHBOARD_PASSWORD } = process.env;
+  if (!DASHBOARD_USERNAME || !DASHBOARD_PASSWORD) {
+    return res.status(503).json({ error: "Dashboard not configured" });
   }
+  const { username, password } = req.body || {};
+  if (username && password && safeEqual(username, DASHBOARD_USERNAME) && safeEqual(password, DASHBOARD_PASSWORD)) {
+    const secure = req.secure ? "; Secure" : "";
+    res.set(
+      "Set-Cookie",
+      `${DASHBOARD_COOKIE}=${dashboardToken()}; HttpOnly; SameSite=Lax; Max-Age=2592000; Path=/${secure}`
+    );
+    return res.json({ ok: true });
+  }
+  return res.status(401).json({ error: "Incorrect username or password." });
+});
 
-  res.set("WWW-Authenticate", 'Basic realm="Oven Art Dashboard"');
-  return res.sendStatus(401);
-}
+app.post("/logout", (_req, res) => {
+  res.set("Set-Cookie", `${DASHBOARD_COOKIE}=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/`);
+  res.redirect("/login");
+});
 
-app.get("/dashboard", requireDashboardAuth, (_req, res) => {
+app.get("/dashboard", requireDashboardPage, (_req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
 });
 // Scoped to just /images (not the whole public/ dir) so dashboard.html stays
 // reachable only through the authed route above, never served statically.
 app.use("/images", express.static(path.join(__dirname, "..", "public", "images")));
-app.use("/api", requireDashboardAuth);
+app.use("/api", requireDashboardApi);
 
 app.get("/api/customers", (_req, res) => {
   res.json(listCustomers());

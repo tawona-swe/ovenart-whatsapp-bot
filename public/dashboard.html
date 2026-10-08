@@ -56,6 +56,8 @@
   }
   #tabs button:hover { color: rgba(255, 255, 255, .85); }
   #tabs button.active { color: #fff; border-bottom-color: var(--gold); }
+  #logout { margin-left: auto; font-weight: 500 !important; color: rgba(255, 255, 255, .45) !important; }
+  #logout:hover { color: rgba(255, 255, 255, .85) !important; }
 
   #views { flex: 1; min-height: 0; display: flex; }
   .view { flex: 1; display: none; min-width: 0; }
@@ -248,6 +250,7 @@
     <button id="tab-orders">Orders</button>
     <button id="tab-sheet">Daily Sheet</button>
     <button id="tab-customers">Customers</button>
+    <button id="logout">Log out</button>
   </div>
 
   <div id="views">
@@ -294,7 +297,7 @@ let activeTab = "inbox";
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
-  if (res.status === 401) { document.body.innerHTML = "Auth required — reload the page."; throw new Error("401"); }
+  if (res.status === 401) { window.location.href = "/login"; throw new Error("401"); }
   return res;
 }
 
@@ -371,6 +374,10 @@ function switchTab(tab) {
 for (const t of TABS) {
   document.getElementById(`tab-${t}`).addEventListener("click", () => switchTab(t));
 }
+document.getElementById("logout").addEventListener("click", async () => {
+  await fetch("/logout", { method: "POST" });
+  window.location.href = "/login";
+});
 
 // ─── Orders tab ───────────────────────────────────────────────────────────────
 /** Plain-text items display — grouped by shop for merchandise orders. */
