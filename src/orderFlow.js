@@ -288,18 +288,18 @@ async function finalizeOrder(order) {
 
 /** Approve a pending order from the dashboard's Verification tab. */
 async function approveOrder(orderId) {
-  const order = getOrder(orderId);
+  const order = await getOrder(orderId);
   if (!order) throw new Error("Order not found");
-  setStatus(orderId, "confirmed");
+  await setStatus(orderId, "confirmed");
   await finalizeOrder(order);
   return order;
 }
 
 /** Reject a pending order from the dashboard's Verification tab. */
 async function rejectOrder(orderId) {
-  const order = getOrder(orderId);
+  const order = await getOrder(orderId);
   if (!order) throw new Error("Order not found");
-  setStatus(orderId, "rejected");
+  await setStatus(orderId, "rejected");
   try {
     await sendText(
       order.phone,
@@ -352,7 +352,7 @@ async function sendMerchConfirmPrompt(phone, session, customer) {
 
 /** Resume whichever confirm screen the shared timing/notes steps were entered from. */
 async function resumeToConfirm(phone, session) {
-  const customer = getCustomer(phone);
+  const customer = await getCustomer(phone);
   session.state = session.timingReturnState;
   if (session.timingReturnState === "MERCH_CONFIRM") {
     await sendMerchConfirmPrompt(phone, session, customer);
@@ -363,7 +363,7 @@ async function resumeToConfirm(phone, session) {
 
 /** Send whichever entry screen fits: register (new) or order-type choice (returning). */
 async function sendEntryScreen(phone, session) {
-  if (!isRegistered(phone)) {
+  if (!(await isRegistered(phone))) {
     session.state = "REGISTER_START";
     await sendRegisterPrompt(phone);
     return;
@@ -391,6 +391,7 @@ async function handleCatalogOrder(phone, order) {
   }
 
   const session = getSession(phone);
+  const registered = await isRegistered(phone);
 
   // Mid-merchandise-order: this cart belongs to the shop just named, not a
   // standalone singular order.
@@ -404,7 +405,7 @@ async function handleCatalogOrder(phone, order) {
 
   session.cart = cart;
 
-  if (!isRegistered(phone)) {
+  if (!registered) {
     // Keep the cart waiting through registration, then resume checkout.
     session.pendingCartAfterRegister = true;
     session.state = "REGISTER_START";
@@ -441,12 +442,12 @@ async function handleIncoming(phone, input) {
     return null;
   }
 
-  if (isRegistered(phone) && lower === "settings") {
+  if (lower === "settings" && (await isRegistered(phone))) {
     session.state = "SETTINGS_MENU";
-    await sendSettingsMenu(phone, getCustomer(phone));
+    await sendSettingsMenu(phone, await getCustomer(phone));
     return null;
   }
-  if (isRegistered(phone) && lower === "cart") {
+  if (lower === "cart" && (await isRegistered(phone))) {
     if (session.merchShops.length > 0) {
       await sendText(phone, session.merchShops.map((s) => `*${s.name}*\n${formatCart(s.cart)}`).join("\n\n"));
     } else {
@@ -518,7 +519,7 @@ async function handleIncoming(phone, input) {
     }
 
     case "MERCH_CONFIRM": {
-      const customer = getCustomer(phone);
+      const customer = await getCustomer(phone);
 
       if (lower === "confirm_yes") {
         const shops = session.merchShops.map((s) => ({
@@ -654,7 +655,7 @@ async function handleIncoming(phone, input) {
         );
         return null;
       }
-      const customer = saveCustomer(phone, { ...session.registerDraft, address: text, city });
+      const customer = await saveCustomer(phone, { ...session.registerDraft, address: text, city });
       session.registerDraft = null;
       await sendText(phone, `You're registered, ${customer.name}!`);
 
@@ -682,7 +683,7 @@ async function handleIncoming(phone, input) {
         await sendText(phone, "What should we update your address to? Please include your city.");
         return null;
       }
-      await sendSettingsMenu(phone, getCustomer(phone));
+      await sendSettingsMenu(phone, await getCustomer(phone));
       return null;
     }
 
@@ -691,10 +692,10 @@ async function handleIncoming(phone, input) {
         await sendText(phone, "Please enter your name.");
         return null;
       }
-      saveCustomer(phone, { name: text });
+      await saveCustomer(phone, { name: text });
       await sendText(phone, "Name updated.");
       session.state = "SETTINGS_MENU";
-      await sendSettingsMenu(phone, getCustomer(phone));
+      await sendSettingsMenu(phone, await getCustomer(phone));
       return null;
     }
 
@@ -711,10 +712,10 @@ async function handleIncoming(phone, input) {
         );
         return null;
       }
-      saveCustomer(phone, { address: text, city });
+      await saveCustomer(phone, { address: text, city });
       await sendText(phone, "Address updated.");
       session.state = "SETTINGS_MENU";
-      await sendSettingsMenu(phone, getCustomer(phone));
+      await sendSettingsMenu(phone, await getCustomer(phone));
       return null;
     }
 
@@ -749,7 +750,7 @@ async function handleIncoming(phone, input) {
     }
 
     case "CHECKOUT_CONFIRM": {
-      const customer = getCustomer(phone);
+      const customer = await getCustomer(phone);
 
       if (lower === "confirm_yes") {
         const autoApproved = customer.city === AUTO_APPROVE_CITY;

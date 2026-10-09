@@ -43,7 +43,7 @@ async function sendText(to, body) {
         },
       }
     );
-    recordOutbound(to, body);
+    await recordOutbound(to, body);
   } catch (err) {
     // Enrich the error with the full Meta API response body so the caller
     // (server.js) can log exactly what went wrong (e.g. invalid token, number
@@ -105,7 +105,7 @@ async function sendTemplate(to, templateName, languageCode, bodyParams = []) {
         },
       }
     );
-    recordOutbound(to, `[template: ${templateName}] ${bodyParams.join(" | ")}`);
+    await recordOutbound(to, `[template: ${templateName}] ${bodyParams.join(" | ")}`);
   } catch (err) {
     const metaError = err.response?.data;
     if (metaError) {
@@ -173,7 +173,7 @@ async function sendFlow(to, bodyText, flowToken) {
         },
       }
     );
-    recordOutbound(to, `[flow] ${bodyText}`);
+    await recordOutbound(to, `[flow] ${bodyText}`);
   } catch (err) {
     const metaError = err.response?.data;
     if (metaError) {
@@ -220,7 +220,7 @@ async function sendList(to, bodyText, buttonText, sections) {
         },
       }
     );
-    recordOutbound(to, `[list] ${bodyText}`);
+    await recordOutbound(to, `[list] ${bodyText}`);
   } catch (err) {
     const metaError = err.response?.data;
     if (metaError) {
@@ -266,7 +266,7 @@ async function sendButtons(to, bodyText, buttons) {
         },
       }
     );
-    recordOutbound(to, bodyText);
+    await recordOutbound(to, bodyText);
   } catch (err) {
     const metaError = err.response?.data;
     if (metaError) {
@@ -316,7 +316,7 @@ async function sendCatalog(to, bodyText, thumbnailRetailerId) {
         },
       }
     );
-    recordOutbound(to, `[catalog] ${bodyText}`);
+    await recordOutbound(to, `[catalog] ${bodyText}`);
   } catch (err) {
     const metaError = err.response?.data;
     if (metaError) {

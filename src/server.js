@@ -72,7 +72,7 @@ app.post("/webhook", async (req, res) => {
         if (message.type === "order") {
           const items = message.order?.product_items ?? [];
           const total = items.reduce((sum, i) => sum + (i.item_price || 0) * (i.quantity || 0), 0);
-          recordInbound(from, `[Catalog order: ${items.length} items, $${total.toFixed(2)}]`);
+          await recordInbound(from, `[Catalog order: ${items.length} items, $${total.toFixed(2)}]`);
           console.log(`[webhook] ← ${from}: order (${items.length} items)`);
           await handleCatalogOrder(from, message.order);
           continue;
@@ -102,7 +102,7 @@ app.post("/webhook", async (req, res) => {
           continue;
         }
 
-        recordInbound(from, displayText);
+        await recordInbound(from, displayText);
         console.log(`[webhook] ← ${from}: ${input}`);
         await handleIncoming(from, input);
       }
@@ -205,8 +205,8 @@ app.get("/dashboard", requireDashboardPage, (_req, res) => {
 app.use("/images", express.static(path.join(__dirname, "..", "public", "images")));
 app.use("/api", requireDashboardApi);
 
-app.get("/api/customers", (_req, res) => {
-  res.json(listCustomers());
+app.get("/api/customers", async (_req, res) => {
+  res.json(await listCustomers());
 });
 
 app.get("/api/products", (_req, res) => {
@@ -219,8 +219,8 @@ app.get("/api/products", (_req, res) => {
   );
 });
 
-app.get("/api/orders", (_req, res) => {
-  res.json(listOrders());
+app.get("/api/orders", async (_req, res) => {
+  res.json(await listOrders());
 });
 
 app.post("/api/orders/:id/approve", async (req, res) => {
@@ -243,20 +243,29 @@ app.post("/api/orders/:id/reject", async (req, res) => {
   }
 });
 
-app.get("/api/conversations", (_req, res) => {
-  const list = listConversations().map((c) => ({
-    ...c,
-    name: getCustomer(c.phone)?.name ?? null,
-  }));
+app.get("/api/conversations", async (_req, res) => {
+  const conversations = await listConversations();
+  const list = await Promise.all(
+    conversations.map(async (c) => ({
+      ...c,
+      name: (await getCustomer(c.phone))?.name ?? null,
+    }))
+  );
   res.json(list);
 });
 
-app.get("/api/conversations/:phone/messages", (req, res) => {
+app.get("/api/conversations/:phone/messages", async (req, res) => {
+  const [messages, windowOpen, windowExpiresAt, customer] = await Promise.all([
+    getThread(req.params.phone),
+    isWindowOpen(req.params.phone),
+    getWindowExpiresAt(req.params.phone),
+    getCustomer(req.params.phone),
+  ]);
   res.json({
-    messages: getThread(req.params.phone),
-    windowOpen: isWindowOpen(req.params.phone),
-    windowExpiresAt: getWindowExpiresAt(req.params.phone),
-    name: getCustomer(req.params.phone)?.name ?? null,
+    messages,
+    windowOpen,
+    windowExpiresAt,
+    name: customer?.name ?? null,
   });
 });
 
@@ -264,7 +273,7 @@ app.post("/api/conversations/:phone/reply", async (req, res) => {
   const { phone } = req.params;
   const { text } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: "text is required" });
-  if (!isWindowOpen(phone)) {
+  if (!(await isWindowOpen(phone))) {
     return res.status(409).json({ error: "Outside the 24h window — a template is required to message first." });
   }
   try {
