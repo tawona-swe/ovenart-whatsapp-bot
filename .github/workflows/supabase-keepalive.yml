@@ -13,14 +13,18 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST endpoint
+      - name: Query a real table to register as database activity
+        # Hitting the bare /rest/v1/ root only touches the PostgREST gateway,
+        # not the database itself — Supabase's inactivity check tracks actual
+        # query activity, so a real (if tiny) table read is what counts.
         run: |
           status=$(curl -s -o /dev/null -w "%{http_code}" \
-            "${SUPABASE_URL}/rest/v1/" \
-            -H "apikey: ${SUPABASE_ANON_KEY}")
+            "${SUPABASE_URL}/rest/v1/customers?select=phone&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
           echo "Supabase responded with HTTP $status"
-          if [ "$status" -ge 500 ]; then
-            echo "Supabase appears down/unreachable"
+          if [ "$status" -ge 400 ]; then
+            echo "Query failed — check table/RLS/credentials"
             exit 1
           fi
         env:
